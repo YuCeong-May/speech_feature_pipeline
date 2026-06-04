@@ -278,7 +278,7 @@ def main() -> None:
 
     continue_on_error = bool(cfg.get('continue_on_error', True))
     add_bilingual_row = not args.no_bilingual_row
-    save_spectrogram = not args.no_spectrogram
+    save_spectrogram = False
 
     args.work_dir.mkdir(parents=True, exist_ok=True)
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
