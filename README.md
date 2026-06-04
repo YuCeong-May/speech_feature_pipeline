@@ -450,7 +450,6 @@ total_duration_with_pauses_sec,speech_time_sec,pause_threshold_sec,pause_time_se
 ## 5. 重要说明
 
 1. 项目采用唯一责任分工：openSMILE 只导出 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ForcedAligner 只负责对齐后韵律指标。
-2. 内部对齐指标模块不使用 jieba。中文汉字按单字计数，英文/数字连续串按 1 个词计。
+2. 中文汉字按单字计数，英文/数字连续串按 1 个词计。
 3. 默认过滤末尾连续 0 时长 token。若音频末尾确实有发音但被对齐为 0 时长，需要人工检查后使用 `--keep-trailing-zero-duration`。
 4. 对齐结果依赖转录文本质量。如果转录中包含音频里没有说出的内容，末尾或局部可能出现时间戳堆叠，需要人工记录在数据目录 README 中。
-5. NAQ、QOQ 等声门特征没有纳入第一版核心流程。普通麦克风语音上直接估计可靠性有限，建议后续用专门工具单独扩展。
