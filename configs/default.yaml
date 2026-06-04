@@ -26,3 +26,8 @@ opensmile_feature_level: Functionals
 
 # Error handling
 continue_on_error: true
+
+# Optional frame-level and spectrogram output
+frame_time_step_sec: 0.01
+spectrogram_n_mels: 128
+spectrogram_dpi: 150
