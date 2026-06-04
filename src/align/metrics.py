@@ -219,6 +219,8 @@ def sentence_metrics(sentence: dict, pause_threshold: float) -> dict:
         "speech_rate_chars_per_sec": round(safe_div(char_count, total_duration), 6),
         "speech_rate_words_per_min": round(safe_div(word_count, total_duration) * 60, 6),
         "speech_rate_chars_per_min": round(safe_div(char_count, total_duration) * 60, 6),
+        "articulation_rate_syllables_per_sec": round(safe_div(syllable_count, speech_time), 6),
+        "articulation_rate_chars_per_sec": round(safe_div(char_count, speech_time), 6),
         "avg_syllable_duration": round(safe_div(speech_time, syllable_count), 6),
         "target_char_count": sentence["target_char_count"],
         "matched_char_count": sentence["matched_char_count"],
@@ -260,6 +262,8 @@ def summary_metrics(rows: list[dict]) -> dict:
         "speech_rate_chars_per_sec": round(safe_div(char_count, total_duration), 6),
         "speech_rate_words_per_min": round(safe_div(word_count, total_duration) * 60, 6),
         "speech_rate_chars_per_min": round(safe_div(char_count, total_duration) * 60, 6),
+        "articulation_rate_syllables_per_sec": round(safe_div(syllable_count, speech_time), 6),
+        "articulation_rate_chars_per_sec": round(safe_div(char_count, speech_time), 6),
         "avg_syllable_duration": round(safe_div(speech_time, syllable_count), 6),
     }
 
@@ -309,6 +313,8 @@ def global_summary_metrics(items: list[dict], pause_threshold: float) -> dict:
         "speech_rate_chars_per_sec": round(safe_div(char_count, total_duration), 6),
         "speech_rate_words_per_min": round(safe_div(word_count, total_duration) * 60, 6),
         "speech_rate_chars_per_min": round(safe_div(char_count, total_duration) * 60, 6),
+        "articulation_rate_syllables_per_sec": round(safe_div(syllable_count, speech_time), 6),
+        "articulation_rate_chars_per_sec": round(safe_div(char_count, speech_time), 6),
         "avg_syllable_duration_sec": round(safe_div(speech_time, syllable_count), 6),
         "first_valid_start_sec": round(start, 3),
         "last_valid_end_sec": round(end, 3),

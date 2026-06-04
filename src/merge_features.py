@@ -18,7 +18,12 @@ FEATURE_NAME_ZH: dict[str, str] = {
     # 时长
     'duration_sec': '音频总时长_秒',
 
-    # Praat: HNR / jitter / shimmer
+    # Praat: F0 / HNR / jitter / shimmer
+    'praat_F0_mean_hz': 'Praat基频F0均值_Hz',
+    'praat_F0_std_hz': 'Praat基频F0标准差_Hz',
+    'praat_F0_min_hz': 'Praat基频F0最小值_Hz',
+    'praat_F0_max_hz': 'Praat基频F0最大值_Hz',
+    'praat_F0_range_hz': 'Praat基频F0范围_Hz',
     'praat_HNR_mean_db': 'Praat谐波噪声比HNR均值_dB',
     'praat_HNR_std_db': 'Praat谐波噪声比HNR标准差_dB',
     'praat_jitter_local': 'Praat频率微扰Jitter_local',
