@@ -83,7 +83,6 @@ pandas
 PyYAML
 tqdm
 scikit-learn
-matplotlib
 ```
 
 检查基础工具：
@@ -219,8 +218,6 @@ python run.py \
 | `--save_frame_level` | 默认开启 | 帧级 CSV 输出开关，会为每个音频生成频谱帧表和 Praat 帧表；该参数保留用于显式声明。 |
 | `--no_frame_level` | 关闭 | 关闭默认帧级 CSV 输出。 |
 | `--frame_output_dir` | `./output/frame_level` | 帧级 CSV 输出目录。 |
-| `--spectrogram_dir` | `./output/spectrograms` | 传统声学特征提取时同步输出频谱图 PNG。 |
-| `--no_spectrogram` | 关闭 | 跳过频谱图绘制。 |
 | `--run_forced_align` | 默认开启 | 帧级特征完成后，在模型和依赖可用时执行 Forced-Aligner、对齐后韵律指标和句子级声学聚合；该参数保留用于显式声明。 |
 | `--no_forced_align` | 关闭 | 关闭默认 Forced-Aligner 和句子级特征计算。 |
 | `--transcript_dir` | `--input_dir` | 转录文本目录，按音频同名 `.txt` 匹配。 |
@@ -287,7 +284,7 @@ src/align/metrics.py
 
 默认情况下，`run.py` 会按照下面顺序执行；如果模型或 `qwen_asr/torch` 依赖不可用，会记录 warning 并跳过 Forced-Aligner，可用 `--no_forced_align` 显式关闭：
 
-1. 先提取传统声学汇总特征，并同步绘制频谱图。
+1. 先提取传统声学汇总特征。
 2. 默认提取帧级频谱特征和帧级 Praat 特征。
 3. 再按音频 `file_id` 到 `--transcript_dir` 中寻找同名 `.txt` 转录文本。
 4. 调用 Qwen3-ForcedAligner 生成 JSON/TSV 时间戳。
@@ -359,7 +356,6 @@ output/features_spectral.csv
 output/features_opensmile.csv
 output/features_praat.csv
 output/features_all_feature_name_mapping.csv
-output/spectrograms/
 output/work_wav/
 output/logs/extract.log
 

@@ -27,9 +27,7 @@ opensmile_feature_level: Functionals
 # Error handling
 continue_on_error: true
 
-# Optional frame-level and spectrogram output
+# Optional frame-level output
 frame_time_step_sec: 0.05
 # Frame-level LPCC is expensive for long interviews; whole-file LPCC summary remains enabled above.
 frame_spectral_include_lpcc: false
-spectrogram_n_mels: 128
-spectrogram_dpi: 150
