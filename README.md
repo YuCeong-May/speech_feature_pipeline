@@ -5,7 +5,7 @@
 1. 直接从音频提取声学特征：FFmpeg + openSMILE + praat-parselmouth + Librosa/SciPy。
 2. 在已有标准答案转录文本时，使用 Qwen3-ForcedAligner 做强制对齐，再根据对齐时间戳计算语速、停顿、发音时间、平均音节时长等对齐后韵律指标。
 
-本项目当前不包含 ASR 自动转录步骤。`.txt` 转录文本由外部提供，`run.py` 默认会在条件满足时调用内部对齐模块，把已有文本与音频对齐并生成时间戳。
+输入包括音频文件，以及用于强制对齐的同名 `.txt` 转录文本；`run.py` 会在条件满足时调用内部对齐模块，为文本生成时间戳。
 
 
 ## 0. 实验平台
@@ -113,6 +113,7 @@ conda activate qwen3-forced-aligner
 pip install -U pip setuptools wheel
 pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchaudio==2.6.0
 pip install -U qwen-asr soundfile librosa pandas numpy
+pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
 ```
 
 本项目不要求安装 `flash-attn`。如果不使用 flash attention，加载模型时不要传 `attn_implementation="flash_attention_2"`。
@@ -139,35 +140,19 @@ Qwen3-ForcedAligner 模型建议下载到项目同级的模型目录：
 ../pre_trained_models/Qwen3-ForcedAligner-0.6B
 ```
 
-1. 用 `hf-mirror.com` clone 仓库元数据。
-2. 跳过 Git LFS smudge，避免 clone 阶段长时间卡住。
-3. 用 `wget -c` 单独下载 LFS 权重文件，支持断点续传和重试。
-
-命令如下：
+在 `qwen3-forced-aligner` 环境中使用 Hugging Face CLI 下载：
 
 ```bash
-BASE_DIR=../pre_trained_models
-MIRROR=https://hf-mirror.com
-REPO=Qwen/Qwen3-ForcedAligner-0.6B
-NAME=Qwen3-ForcedAligner-0.6B
-DEST="${BASE_DIR}/${NAME}"
+conda activate qwen3-forced-aligner
 
-mkdir -p "${DEST}"
-TMP=$(mktemp -d "/tmp/hfclone-${NAME}.XXXXXX")
+pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
+unset HF_HUB_ENABLE_HF_TRANSFER
+export HF_ENDPOINT=https://hf-mirror.com
+export HF_HUB_DISABLE_XET=1
 
-GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 "${MIRROR}/${REPO}" "${TMP}/repo"
-git -C "${TMP}/repo" lfs ls-files -l | sed -E 's/^[^ ]+ [*-] //' > "${TMP}/lfs-paths"
-rsync -a --exclude-from="${TMP}/lfs-paths" "${TMP}/repo/" "${DEST}/"
-
-while IFS= read -r path; do
-  [ -z "${path}" ] && continue
-  mkdir -p "${DEST}/$(dirname "${path}")"
-  wget -c --tries=20 --timeout=30 --waitretry=5 \
-    -O "${DEST}/${path}" \
-    "${MIRROR}/${REPO}/resolve/main/$(printf '%s' "${path}" | sed 's/ /%20/g')"
-done < "${TMP}/lfs-paths"
-
-rm -rf "${TMP}"
+hf download Qwen/Qwen3-ForcedAligner-0.6B \
+  --local-dir ../pre_trained_models/Qwen3-ForcedAligner-0.6B \
+  --force-download
 ```
 
 下载完成后检查：
@@ -251,7 +236,7 @@ python run.py \
 | 频谱 | LPCC | Python 自定义 LPC -> LPCC | `lpcc...` |
 | 对齐后韵律 | 语速、停顿时长、停顿次数、发音时间、平均音节时长、停顿占比 | Qwen3-ForcedAligner + `run.py` 内部指标模块 | `output/metrics/` |
 
-说明：openSMILE 的 eGeMAPS 本身会包含部分频谱字段，但本项目只保留 F0、loudness、volume 相关字段，避免与 Librosa/SciPy 重复。代码中具体使用的是 `praat-parselmouth` Python 包，即 `parselmouth.Sound` 和 `parselmouth.praat.call(...)`，不是额外调用 Praat GUI 或独立 Praat 命令行程序。
+说明：openSMILE 负责 F0、loudness、volume 相关字段；Librosa/SciPy 负责频谱字段。Praat 相关计算通过 `praat-parselmouth` Python 包完成，即 `parselmouth.Sound` 和 `parselmouth.praat.call(...)`。
 
 配置文件：
 
@@ -496,8 +481,7 @@ total_duration_with_pauses_sec,speech_time_sec,pause_threshold_sec,pause_time_se
 
 ## 6. 重要说明
 
-1. 项目采用唯一责任分工：openSMILE 只导出 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ForcedAligner 只负责对齐后韵律指标。
-2. 内部对齐指标模块不使用 jieba。中文汉字按单字计数，英文/数字连续串按 1 个词计。
-3. 默认过滤末尾连续 0 时长 token。若音频末尾确实有发音但被对齐为 0 时长，需要人工检查后使用 `--keep-trailing-zero-duration`。
-4. 对齐结果依赖转录文本质量。如果转录中包含音频里没有说出的内容，末尾或局部可能出现时间戳堆叠，需要人工记录在数据目录 README 中。
-5. NAQ、QOQ 等声门特征没有纳入第一版核心流程。普通麦克风语音上直接估计可靠性有限，建议后续用专门工具单独扩展。
+1. 项目采用唯一责任分工：openSMILE 负责 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ForcedAligner 负责对齐后韵律指标。
+2. 中文计数按汉字逐字统计，英文/数字连续串按 1 个词计。
+3. 默认过滤末尾连续 0 时长 token。若音频末尾确实有发音但被对齐为 0 时长，可人工检查后使用 `--keep-trailing-zero-duration`。
+4. 对齐结果依赖转录文本质量。如果转录中包含音频里没有说出的内容，末尾或局部可能出现时间戳堆叠，建议在数据目录 README 中记录。
