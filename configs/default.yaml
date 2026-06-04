@@ -1,0 +1,28 @@
+# Audio feature extraction config
+sample_rate: 16000
+mono: true
+
+# Frame-level spectral analysis
+frame_length: 2048
+hop_length: 512
+
+# Spectral features
+mfcc_n: 13
+lpcc_order: 13
+lpc_order: 16
+psd_nperseg: 1024
+
+# Praat / Parselmouth settings
+praat_pitch_floor: 75
+praat_pitch_ceiling: 600
+praat_formant_max_hz: 5500
+praat_formant_number: 5
+praat_formant_window_length: 0.025
+
+# openSMILE FeatureSet: eGeMAPSv02 is recommended for interpretable clinical/psychology studies.
+# Optional values: eGeMAPSv02, ComParE_2016
+opensmile_feature_set: eGeMAPSv02
+opensmile_feature_level: Functionals
+
+# Error handling
+continue_on_error: true
