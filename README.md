@@ -109,28 +109,13 @@ Qwen3-ForcedAligner 模型建议下载到项目同级的模型目录：
 命令如下：
 
 ```bash
-BASE_DIR=../pre_trained_models
-MIRROR=https://hf-mirror.com
-REPO=Qwen/Qwen3-ForcedAligner-0.6B
-NAME=Qwen3-ForcedAligner-0.6B
-DEST="${BASE_DIR}/${NAME}"
+unset HF_HUB_ENABLE_HF_TRANSFER
+export HF_ENDPOINT=https://hf-mirror.com
+export HF_HUB_DISABLE_XET=1
 
-mkdir -p "${DEST}"
-TMP=$(mktemp -d "/tmp/hfclone-${NAME}.XXXXXX")
-
-GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 "${MIRROR}/${REPO}" "${TMP}/repo"
-git -C "${TMP}/repo" lfs ls-files -l | sed -E 's/^[^ ]+ [*-] //' > "${TMP}/lfs-paths"
-rsync -a --exclude-from="${TMP}/lfs-paths" "${TMP}/repo/" "${DEST}/"
-
-while IFS= read -r path; do
-  [ -z "${path}" ] && continue
-  mkdir -p "${DEST}/$(dirname "${path}")"
-  wget -c --tries=20 --timeout=30 --waitretry=5 \
-    -O "${DEST}/${path}" \
-    "${MIRROR}/${REPO}/resolve/main/$(printf '%s' "${path}" | sed 's/ /%20/g')"
-done < "${TMP}/lfs-paths"
-
-rm -rf "${TMP}"
+hf download Qwen/Qwen3-ForcedAligner-0.6B \
+  --local-dir ../pre_trained_models/Qwen3-ForcedAligner-0.6B \
+  --force-download
 ```
 
 下载完成后检查：
