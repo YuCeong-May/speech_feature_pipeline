@@ -36,8 +36,8 @@ def extract_opensmile_features(wav_path: Path, cfg: dict) -> dict:
     row = df.iloc[0]
     result = {}
     for col, val in row.items():
-        # Keep openSMILE's final responsibility narrow; duplicate voice-quality
-        # and spectral fields are exported by Praat and Librosa/SciPy instead.
+        # Keep openSMILE's final responsibility narrow; spectral fields are
+        # exported by Librosa/SciPy instead.
         if not any(pattern in col for pattern in OPENSMILE_FINAL_PATTERNS):
             continue
         try:
