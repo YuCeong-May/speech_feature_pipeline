@@ -218,7 +218,7 @@ python run.py \
   --input_dir ./input_audio \
   --output_csv ./output/features_all.csv \
   --save_parts \
-  --transcript_dir ./input_audio \
+  --transcript_dir ./audio_input \
   --forced_align_model ../pre_trained_models/Qwen3-ForcedAligner-0.6B
 ```
 
