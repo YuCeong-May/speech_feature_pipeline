@@ -15,6 +15,7 @@ from src.extract_opensmile import extract_opensmile_features
 from src.extract_praat import extract_praat_features, extract_praat_frame_features, summarize_praat_frame_features
 from src.extract_spectral import extract_spectral_features, extract_spectral_frame_features
 from src.merge_features import save_feature_table
+from src.plot_spectrogram import plot_spectrogram
 from src.preprocess import convert_to_wav
 from src.sentence_features import aggregate_sentence_acoustic_features
 from src.utils import list_audio_files, load_config, setup_logger
@@ -277,6 +278,7 @@ def main() -> None:
 
     continue_on_error = bool(cfg.get('continue_on_error', True))
     add_bilingual_row = not args.no_bilingual_row
+    save_spectrogram = not args.no_spectrogram
 
     args.work_dir.mkdir(parents=True, exist_ok=True)
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -334,6 +336,28 @@ def main() -> None:
                 _save_frame_csv(spectral_frame_rows, spectral_frame_path)
                 _save_frame_csv(praat_frame_rows, praat_frame_path)
                 logger.info(f'[{file_id}] Saved frame-level features: {spectral_frame_path}, {praat_frame_path}')
+
+            if save_spectrogram:
+                spectrogram_path = args.spectrogram_dir / f'{file_id}.spectrogram.png'
+                if importlib.util.find_spec('matplotlib') is None:
+                    logger.warning(
+                        f'Skip spectrogram for {file_id}: matplotlib is not installed. '
+                        'Install matplotlib to enable spectrogram plotting.'
+                    )
+                else:
+                    plot_spectrogram(wav_path, spectrogram_path, cfg)
+
+            if args.save_frame_level:
+                spectral_frame_rows = [
+                    {**base, **row}
+                    for row in extract_spectral_frame_features(wav_path, cfg)
+                ]
+                praat_frame_rows = [
+                    {**base, **row}
+                    for row in extract_praat_frame_features(wav_path, cfg)
+                ]
+                _save_frame_csv(spectral_frame_rows, args.frame_output_dir / f'{file_id}.spectral_frames.csv')
+                _save_frame_csv(praat_frame_rows, args.frame_output_dir / f'{file_id}.praat_frames.csv')
 
             row_all = {
                 **base,

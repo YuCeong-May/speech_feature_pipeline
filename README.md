@@ -83,6 +83,7 @@ pandas
 PyYAML
 tqdm
 scikit-learn
+matplotlib
 ```
 
 检查基础工具：
@@ -341,6 +342,7 @@ output/features_spectral.csv
 output/features_opensmile.csv
 output/features_praat.csv
 output/features_all_feature_name_mapping.csv
+output/spectrograms/
 output/work_wav/
 output/logs/extract.log
 
