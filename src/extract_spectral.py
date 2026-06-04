@@ -125,12 +125,13 @@ def extract_spectral_frame_features(wav_path: Path, cfg: dict) -> list[dict[str,
     n_mfcc = int(cfg.get('mfcc_n', 13))
     lpc_order = int(cfg.get('lpc_order', 16))
     lpcc_order = int(cfg.get('lpcc_order', 13))
+    include_lpcc = bool(cfg.get('frame_spectral_include_lpcc', False))
 
     rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc, hop_length=hop_length)
     stft_power = np.abs(librosa.stft(y, n_fft=frame_length, hop_length=hop_length)) ** 2
     freqs = librosa.fft_frequencies(sr=sr, n_fft=frame_length)
-    lpcc = _frame_lpcc(y, frame_length, hop_length, lpc_order, lpcc_order)
+    lpcc = _frame_lpcc(y, frame_length, hop_length, lpc_order, lpcc_order) if include_lpcc else None
 
     frame_count = max(rms.shape[0], mfcc.shape[1], stft_power.shape[1])
     centers = librosa.frames_to_time(np.arange(frame_count), sr=sr, hop_length=hop_length, n_fft=frame_length)
@@ -158,7 +159,8 @@ def extract_spectral_frame_features(wav_path: Path, cfg: dict) -> list[dict[str,
             row.update(_stats('frame_psd', np.array([])))
             for lo, hi in bands:
                 row[f'frame_bandpower_{lo}_{hi}_hz'] = np.nan
-        for lpcc_idx in range(lpcc_order):
-            row[f'frame_lpcc{lpcc_idx + 1}'] = _safe(lpcc[idx, lpcc_idx]) if idx < lpcc.shape[0] else np.nan
+        if lpcc is not None:
+            for lpcc_idx in range(lpcc_order):
+                row[f'frame_lpcc{lpcc_idx + 1}'] = _safe(lpcc[idx, lpcc_idx]) if idx < lpcc.shape[0] else np.nan
         rows.append(row)
     return rows

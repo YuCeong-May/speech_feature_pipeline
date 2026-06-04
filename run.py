@@ -12,11 +12,12 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.extract_opensmile import extract_opensmile_features
-from src.extract_praat import extract_praat_features, extract_praat_frame_features
+from src.extract_praat import extract_praat_features, extract_praat_frame_features, summarize_praat_frame_features
 from src.extract_spectral import extract_spectral_features, extract_spectral_frame_features
 from src.merge_features import save_feature_table
 from src.plot_spectrogram import plot_spectrogram
 from src.preprocess import convert_to_wav
+from src.sentence_features import aggregate_sentence_acoustic_features
 from src.utils import list_audio_files, load_config, setup_logger
 
 
@@ -62,7 +63,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--save_frame_level',
         action='store_true',
-        help='Switch on frame-level CSV export for spectral, pitch/intensity, and formant time series.',
+        default=True,
+        help='Export frame-level CSV files. Enabled by default; kept for backward-compatible explicit use.',
+    )
+
+    parser.add_argument(
+        '--no_frame_level',
+        dest='save_frame_level',
+        action='store_false',
+        help='Disable default frame-level CSV export.',
     )
 
     parser.add_argument(
@@ -70,19 +79,6 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path('./output/frame_level'),
         help='Folder for optional frame-level CSV files.',
-    )
-
-    parser.add_argument(
-        '--spectrogram_dir',
-        type=Path,
-        default=Path('./output/spectrograms'),
-        help='Folder for spectrogram PNG files generated during traditional acoustic extraction.',
-    )
-
-    parser.add_argument(
-        '--no_spectrogram',
-        action='store_true',
-        help='Skip spectrogram plotting.',
     )
 
     parser.add_argument(
@@ -94,7 +90,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--run_forced_align',
         action='store_true',
-        help='After traditional acoustic extraction, run Qwen3-ForcedAligner and alignment metrics for audio/text pairs.',
+        default=True,
+        help='Run Qwen3-ForcedAligner and sentence-level metrics after acoustic extraction. Enabled by default.',
+    )
+
+    parser.add_argument(
+        '--no_forced_align',
+        dest='run_forced_align',
+        action='store_false',
+        help='Disable default forced alignment and sentence-level metric calculation.',
     )
 
     parser.add_argument(
@@ -116,6 +120,13 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path('./output/metrics'),
         help='Folder for forced-alignment metric outputs.',
+    )
+
+    parser.add_argument(
+        '--sentence_output_dir',
+        type=Path,
+        default=Path('./output/sentence_level'),
+        help='Folder for sentence-level acoustic feature outputs aggregated from frame-level CSVs.',
     )
 
     parser.add_argument(
@@ -158,13 +169,28 @@ def _run_command(cmd: list[str]) -> None:
 
 def _run_forced_alignment(args: argparse.Namespace, wav_jobs: list[tuple[str, Path]], logger) -> None:
     transcript_dir = args.transcript_dir or args.input_dir
+    model_path = Path(args.forced_align_model).expanduser()
+    if importlib.util.find_spec('qwen_asr') is None or importlib.util.find_spec('torch') is None:
+        logger.warning(
+            'Skip forced alignment and sentence-level metrics: qwen_asr/torch is not installed in this Python environment. '
+            'Run in the qwen3-forced-aligner environment or pass --no_forced_align.'
+        )
+        return
+    if not model_path.exists():
+        logger.warning(
+            f'Skip forced alignment and sentence-level metrics: model not found at {model_path}. '
+            'Pass --no_forced_align to silence this step, or set --forced_align_model to a valid model directory.'
+        )
+        return
+
     args.align_output_dir.mkdir(parents=True, exist_ok=True)
     args.metrics_output_dir.mkdir(parents=True, exist_ok=True)
+    args.sentence_output_dir.mkdir(parents=True, exist_ok=True)
 
     align_script = Path(__file__).parent / 'src' / 'align' / 'forced_align.py'
     metrics_script = Path(__file__).parent / 'src' / 'align' / 'metrics.py'
 
-    for file_id, wav_path in tqdm(wav_jobs, desc='Forced aligning'):
+    for file_id, wav_path in tqdm(wav_jobs, desc='Forced aligning and sentence-level features'):
         transcript_path = _find_transcript(transcript_dir, file_id)
         if transcript_path is None:
             logger.warning(f'Skip forced alignment for {file_id}: transcript not found in {transcript_dir}')
@@ -173,6 +199,7 @@ def _run_forced_alignment(args: argparse.Namespace, wav_jobs: list[tuple[str, Pa
         output_json = args.align_output_dir / f'{file_id}.qwen3_forced_align.json'
         output_tsv = args.align_output_dir / f'{file_id}.qwen3_forced_align.tsv'
 
+        logger.info(f'[{file_id}] Running Qwen3 forced alignment...')
         _run_command([
             sys.executable,
             str(align_script),
@@ -208,7 +235,24 @@ def _run_forced_alignment(args: argparse.Namespace, wav_jobs: list[tuple[str, Pa
         ]
         if args.keep_trailing_zero_duration:
             metrics_cmd.append('--keep-trailing-zero-duration')
+        logger.info(f'[{file_id}] Calculating global and sentence-level alignment metrics...')
         _run_command(metrics_cmd)
+
+        if args.save_frame_level:
+            for mode in ('independent_filler', 'merge_filler_to_next'):
+                sentence_metrics_csv = args.metrics_output_dir / f'{output_json.stem}.{mode}.metrics.csv'
+                if not sentence_metrics_csv.exists():
+                    continue
+                spectral_frame_csv = args.frame_output_dir / f'{file_id}.spectral_frames.csv'
+                praat_frame_csv = args.frame_output_dir / f'{file_id}.praat_frames.csv'
+                sentence_output_csv = args.sentence_output_dir / f'{file_id}.{mode}.sentence_acoustic.csv'
+                aggregate_sentence_acoustic_features(
+                    sentence_metrics_csv,
+                    spectral_frame_csv,
+                    praat_frame_csv,
+                    sentence_output_csv,
+                )
+                logger.info(f'[{file_id}] Saved sentence-level acoustic features: {sentence_output_csv}')
 
 
 def main() -> None:
@@ -250,6 +294,7 @@ def main() -> None:
         }
 
         try:
+            logger.info(f'[{file_id}] Converting to standardized wav...')
             convert_to_wav(
                 audio_path,
                 wav_path,
@@ -258,9 +303,39 @@ def main() -> None:
             )
             wav_jobs.append((file_id, wav_path))
 
+            logger.info(f'[{file_id}] Extracting spectral summary features...')
             spectral_feats = extract_spectral_features(wav_path, cfg)
+            logger.info(f'[{file_id}] Extracting openSMILE summary features...')
             smile_feats = extract_opensmile_features(wav_path, cfg)
-            praat_feats = extract_praat_features(wav_path, cfg)
+            praat_frame_rows = None
+            if args.save_frame_level:
+                logger.info(f'[{file_id}] Extracting frame-level Praat features...')
+                praat_frame_rows = [
+                    {**base, **row}
+                    for row in extract_praat_frame_features(wav_path, cfg)
+                ]
+                praat_feats = summarize_praat_frame_features(praat_frame_rows)
+            else:
+                logger.info(f'[{file_id}] Extracting Praat summary features...')
+                praat_feats = extract_praat_features(wav_path, cfg)
+
+            if args.save_frame_level:
+                logger.info(f'[{file_id}] Extracting frame-level spectral features...')
+                spectral_frame_rows = [
+                    {**base, **row}
+                    for row in extract_spectral_frame_features(wav_path, cfg)
+                ]
+                if praat_frame_rows is None:
+                    logger.info(f'[{file_id}] Extracting frame-level Praat features...')
+                    praat_frame_rows = [
+                        {**base, **row}
+                        for row in extract_praat_frame_features(wav_path, cfg)
+                    ]
+                spectral_frame_path = args.frame_output_dir / f'{file_id}.spectral_frames.csv'
+                praat_frame_path = args.frame_output_dir / f'{file_id}.praat_frames.csv'
+                _save_frame_csv(spectral_frame_rows, spectral_frame_path)
+                _save_frame_csv(praat_frame_rows, praat_frame_path)
+                logger.info(f'[{file_id}] Saved frame-level features: {spectral_frame_path}, {praat_frame_path}')
 
             if save_spectrogram:
                 spectrogram_path = args.spectrogram_dir / f'{file_id}.spectrogram.png'
@@ -348,8 +423,10 @@ def main() -> None:
         logger.info(f'Saved part-level CSV files under: {out_dir.resolve()}')
 
     if args.run_forced_align:
-        logger.info('Traditional acoustic extraction finished. Starting Qwen3-ForcedAligner and alignment metrics.')
+        logger.info('Traditional acoustic extraction and frame-level features finished. Starting Qwen3-ForcedAligner and sentence-level metrics.')
         _run_forced_alignment(args, wav_jobs, logger)
+    else:
+        logger.info('Forced alignment and sentence-level metrics disabled by --no_forced_align.')
 
 
 if __name__ == '__main__':
