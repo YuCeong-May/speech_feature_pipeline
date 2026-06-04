@@ -102,13 +102,12 @@ Qwen3-ForcedAligner 模型建议下载到项目同级的模型目录：
 ../pre_trained_models/Qwen3-ForcedAligner-0.6B
 ```
 
-1. 用 `hf-mirror.com` clone 仓库元数据。
-2. 跳过 Git LFS smudge，避免 clone 阶段长时间卡住。
-3. 用 `wget -c` 单独下载 LFS 权重文件，支持断点续传和重试。
+用 `hf-mirror.com` clone 仓库元数据。
 
 命令如下：
 
 ```bash
+pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
 unset HF_HUB_ENABLE_HF_TRANSFER
 export HF_ENDPOINT=https://hf-mirror.com
 export HF_HUB_DISABLE_XET=1
