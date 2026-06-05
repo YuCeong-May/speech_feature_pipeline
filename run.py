@@ -65,10 +65,31 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        '--run_traditional_acoustic',
+        action='store_true',
+        default=True,
+        help='Run traditional acoustic feature extraction. Enabled by default.',
+    )
+
+    parser.add_argument(
+        '--no_traditional_acoustic',
+        dest='run_traditional_acoustic',
+        action='store_false',
+        help='Disable traditional acoustic feature extraction.',
+    )
+
+    parser.add_argument(
         '--run_transcription',
         action='store_true',
-        default=False,
-        help='Run Qwen3-ASR transcription before forced alignment. Disabled by default.',
+        default=True,
+        help='Run Qwen3-ASR transcription before forced alignment. Enabled by default.',
+    )
+
+    parser.add_argument(
+        '--no_transcription',
+        dest='run_transcription',
+        action='store_false',
+        help='Disable Qwen3-ASR transcription and use --transcript_dir/input text for forced alignment.',
     )
 
     parser.add_argument(
@@ -178,12 +199,27 @@ def _run_command(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
-def _run_transcription(args: argparse.Namespace, wav_jobs: list[tuple[str, Path]], logger) -> Path:
+def _qwen_runtime_available(logger, step_name: str) -> bool:
+    if importlib.util.find_spec('qwen_asr') is None or importlib.util.find_spec('torch') is None:
+        logger.warning(
+            f'Skip {step_name}: qwen_asr/torch is not installed in this Python environment. '
+            'Install/use the unified qwen3-asr-aligner environment, or disable this module with the corresponding --no_* flag.'
+        )
+        return False
+    return True
+
+
+def _run_transcription(args: argparse.Namespace, wav_jobs: list[tuple[str, Path]], logger) -> Path | None:
+    if not _qwen_runtime_available(logger, 'Qwen3-ASR transcription'):
+        return None
+
     model_path = Path(args.asr_model).expanduser()
     if not model_path.exists():
-        raise FileNotFoundError(
-            f'Qwen3-ASR model not found at {model_path}. Set --asr_model to a valid local model directory.'
+        logger.warning(
+            f'Skip Qwen3-ASR transcription: model not found at {model_path}. '
+            'Set --asr_model to a valid local model directory or pass --no_transcription.'
         )
+        return None
 
     args.transcription_output_dir.mkdir(parents=True, exist_ok=True)
     transcribe_script = Path(__file__).parent / 'src' / 'align' / 'transcribe.py'
@@ -219,15 +255,15 @@ def _run_transcription(args: argparse.Namespace, wav_jobs: list[tuple[str, Path]
 
     return args.transcription_output_dir
 
-
-def _run_forced_alignment(args: argparse.Namespace, wav_jobs: list[tuple[str, Path]], logger, cfg: dict) -> None:
-    transcript_dir = args.transcript_dir or args.input_dir
+def _run_forced_alignment(
+    args: argparse.Namespace,
+    wav_jobs: list[tuple[str, Path]],
+    logger,
+    cfg: dict,
+    transcript_dir: Path,
+) -> None:
     model_path = Path(args.forced_align_model).expanduser()
-    if importlib.util.find_spec('qwen_asr') is None or importlib.util.find_spec('torch') is None:
-        logger.warning(
-            'Skip forced alignment and sentence-level metrics: qwen_asr/torch is not installed in this Python environment. '
-            'Install/use the unified qwen3-asr-aligner environment or pass --no_forced_align.'
-        )
+    if not _qwen_runtime_available(logger, 'Qwen3-ForcedAligner and sentence-level metrics'):
         return
     if not model_path.exists():
         logger.warning(
@@ -235,13 +271,6 @@ def _run_forced_alignment(args: argparse.Namespace, wav_jobs: list[tuple[str, Pa
             'Pass --no_forced_align to silence this step, or set --forced_align_model to a valid model directory.'
         )
         return
-
-    if args.run_transcription:
-        try:
-            transcript_dir = _run_transcription(args, wav_jobs, logger)
-        except Exception:
-            logger.error(f'Skip forced alignment: Qwen3-ASR transcription failed.\n{traceback.format_exc()}')
-            return
 
     args.align_output_dir.mkdir(parents=True, exist_ok=True)
     args.metrics_output_dir.mkdir(parents=True, exist_ok=True)
@@ -330,6 +359,10 @@ def main() -> None:
 
     logger.info(f'Found {len(input_files)} audio files.')
 
+    if not any([args.run_traditional_acoustic, args.run_transcription, args.run_forced_align]):
+        logger.warning('All modules are disabled. Nothing to run.')
+        return
+
     rows_all: list[dict] = []
     rows_smile: list[dict] = []
     rows_praat: list[dict] = []
@@ -342,7 +375,7 @@ def main() -> None:
     args.work_dir.mkdir(parents=True, exist_ok=True)
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    for audio_path in tqdm(input_files, desc='Extracting traditional acoustic features'):
+    for audio_path in tqdm(input_files, desc='Preparing audio and running enabled acoustic modules'):
         file_id = audio_path.stem
         wav_path = args.work_dir / f'{file_id}.wav'
 
@@ -362,25 +395,26 @@ def main() -> None:
             )
             wav_jobs.append((file_id, wav_path))
 
-            logger.info(f'[{file_id}] Extracting spectral summary features...')
-            spectral_feats = extract_spectral_features(wav_path, cfg)
-            logger.info(f'[{file_id}] Extracting openSMILE summary features...')
-            smile_feats = extract_opensmile_features(wav_path, cfg)
-            logger.info(f'[{file_id}] Extracting Praat summary features...')
-            praat_feats = extract_praat_features(wav_path, cfg)
+            if args.run_traditional_acoustic:
+                logger.info(f'[{file_id}] Extracting spectral summary features...')
+                spectral_feats = extract_spectral_features(wav_path, cfg)
+                logger.info(f'[{file_id}] Extracting openSMILE summary features...')
+                smile_feats = extract_opensmile_features(wav_path, cfg)
+                logger.info(f'[{file_id}] Extracting Praat summary features...')
+                praat_feats = extract_praat_features(wav_path, cfg)
 
-            row_all = {
-                **base,
-                'status': 'ok',
-                **spectral_feats,
-                **smile_feats,
-                **praat_feats,
-            }
+                row_all = {
+                    **base,
+                    'status': 'ok',
+                    **spectral_feats,
+                    **smile_feats,
+                    **praat_feats,
+                }
 
-            rows_all.append(row_all)
-            rows_spectral.append({**base, 'status': 'ok', **spectral_feats})
-            rows_smile.append({**base, 'status': 'ok', **smile_feats})
-            rows_praat.append({**base, 'status': 'ok', **praat_feats})
+                rows_all.append(row_all)
+                rows_spectral.append({**base, 'status': 'ok', **spectral_feats})
+                rows_smile.append({**base, 'status': 'ok', **smile_feats})
+                rows_praat.append({**base, 'status': 'ok', **praat_feats})
 
         except Exception as e:
             logger.error(f'Failed: {audio_path}\n{traceback.format_exc()}')
@@ -391,50 +425,70 @@ def main() -> None:
                 'error': str(e),
             }
 
-            rows_all.append(err_row)
-            rows_spectral.append(err_row)
-            rows_smile.append(err_row)
-            rows_praat.append(err_row)
+            if args.run_traditional_acoustic:
+                rows_all.append(err_row)
+                rows_spectral.append(err_row)
+                rows_smile.append(err_row)
+                rows_praat.append(err_row)
 
             if not continue_on_error:
                 raise
 
-    df = save_feature_table(
-        rows_all,
-        args.output_csv,
-        add_bilingual_row=add_bilingual_row,
-    )
-
-    logger.info(
-        f'Saved merged traditional acoustic features: {args.output_csv.resolve()} | shape={df.shape}'
-    )
-
-    if args.save_parts:
-        out_dir = args.output_csv.parent
-
-        save_feature_table(
-            rows_spectral,
-            out_dir / 'features_spectral.csv',
+    if args.run_traditional_acoustic:
+        df = save_feature_table(
+            rows_all,
+            args.output_csv,
             add_bilingual_row=add_bilingual_row,
         )
 
-        save_feature_table(
-            rows_smile,
-            out_dir / 'features_opensmile.csv',
-            add_bilingual_row=add_bilingual_row,
+        logger.info(
+            f'Saved merged traditional acoustic features: {args.output_csv.resolve()} | shape={df.shape}'
         )
 
-        save_feature_table(
-            rows_praat,
-            out_dir / 'features_praat.csv',
-            add_bilingual_row=add_bilingual_row,
-        )
+        if args.save_parts:
+            out_dir = args.output_csv.parent
 
-        logger.info(f'Saved part-level CSV files under: {out_dir.resolve()}')
+            save_feature_table(
+                rows_spectral,
+                out_dir / 'features_spectral.csv',
+                add_bilingual_row=add_bilingual_row,
+            )
+
+            save_feature_table(
+                rows_smile,
+                out_dir / 'features_opensmile.csv',
+                add_bilingual_row=add_bilingual_row,
+            )
+
+            save_feature_table(
+                rows_praat,
+                out_dir / 'features_praat.csv',
+                add_bilingual_row=add_bilingual_row,
+            )
+
+            logger.info(f'Saved part-level CSV files under: {out_dir.resolve()}')
+    else:
+        logger.info('Traditional acoustic feature extraction disabled by --no_traditional_acoustic.')
+
+    if not wav_jobs:
+        if args.run_transcription or args.run_forced_align:
+            logger.warning('No standardized wav files are available for enabled downstream modules.')
+        return
+
+    transcript_dir = args.transcript_dir or args.input_dir
+    if args.run_transcription:
+        try:
+            generated_transcript_dir = _run_transcription(args, wav_jobs, logger)
+            if generated_transcript_dir is not None:
+                transcript_dir = generated_transcript_dir
+        except Exception:
+            logger.error(f'Qwen3-ASR transcription failed. Downstream forced alignment will use {transcript_dir}.\n{traceback.format_exc()}')
+    else:
+        logger.info('Qwen3-ASR transcription disabled by --no_transcription; using manual transcripts if forced alignment is enabled.')
 
     if args.run_forced_align:
-        logger.info('Traditional acoustic extraction finished. Starting Qwen3-ForcedAligner and sentence-level metrics.')
-        _run_forced_alignment(args, wav_jobs, logger, cfg)
+        logger.info('Starting Qwen3-ForcedAligner and sentence-level metrics.')
+        _run_forced_alignment(args, wav_jobs, logger, cfg, transcript_dir)
     else:
         logger.info('Forced alignment and sentence-level metrics disabled by --no_forced_align.')
 
