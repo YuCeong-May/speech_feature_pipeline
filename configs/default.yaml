@@ -2,7 +2,7 @@
 sample_rate: 16000
 mono: true
 
-# Frame-level spectral analysis
+# Short-time spectral analysis
 frame_length: 2048
 hop_length: 512
 
