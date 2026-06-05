@@ -56,16 +56,20 @@ def extract_praat_features(wav_path: Path, cfg: dict) -> dict:
 
     # Formants F1-F3.
     try:
+        formant_time_step = float(cfg.get('praat_formant_time_step', 0.02))
         formant = call(
             snd, 'To Formant (burg)',
-            0.0,
+            formant_time_step,
             int(cfg.get('praat_formant_number', 5)),
             float(cfg.get('praat_formant_max_hz', 5500)),
-            float(cfg.get('praat_formant_window_length', 0.025)),
+            float(cfg.get('praat_formant_window_length', 0.05)),
             50,
         )
         duration = snd.get_total_duration()
-        times = np.linspace(0.01, max(0.01, duration - 0.01), num=max(10, int(duration / 0.01)))
+        start_time = min(max(formant_time_step / 2, 0.0), duration)
+        times = np.arange(start_time, duration, formant_time_step)
+        if times.size == 0 and duration > 0:
+            times = np.asarray([duration / 2], dtype=float)
         for idx in [1, 2, 3]:
             vals = []
             for t in times:
@@ -83,94 +87,3 @@ def extract_praat_features(wav_path: Path, cfg: dict) -> dict:
             out[f'praat_F{idx}_median_hz'] = np.nan
 
     return out
-
-
-def summarize_praat_frame_features(rows: list[dict[str, float]]) -> dict[str, float]:
-    """Summarize frame-level Praat rows using the same columns as extract_praat_features."""
-    out: dict[str, float] = {}
-
-    def values_for(key: str) -> np.ndarray:
-        vals = np.asarray([row.get(key, np.nan) for row in rows], dtype=float)
-        return vals[np.isfinite(vals)]
-
-    f0 = values_for('praat_F0_hz')
-    out['praat_F0_mean_hz'] = _safe_float(np.mean(f0)) if len(f0) else np.nan
-    out['praat_F0_std_hz'] = _safe_float(np.std(f0)) if len(f0) else np.nan
-    out['praat_F0_min_hz'] = _safe_float(np.min(f0)) if len(f0) else np.nan
-    out['praat_F0_max_hz'] = _safe_float(np.max(f0)) if len(f0) else np.nan
-    out['praat_F0_range_hz'] = _safe_float(np.max(f0) - np.min(f0)) if len(f0) else np.nan
-
-    intensity = values_for('praat_intensity_db')
-    out['praat_intensity_mean_db'] = _safe_float(np.mean(intensity)) if len(intensity) else np.nan
-    out['praat_intensity_std_db'] = _safe_float(np.std(intensity)) if len(intensity) else np.nan
-    out['praat_intensity_min_db'] = _safe_float(np.min(intensity)) if len(intensity) else np.nan
-    out['praat_intensity_max_db'] = _safe_float(np.max(intensity)) if len(intensity) else np.nan
-
-    for idx in [1, 2, 3]:
-        vals = values_for(f'praat_F{idx}_hz')
-        out[f'praat_F{idx}_mean_hz'] = _safe_float(np.mean(vals)) if len(vals) else np.nan
-        out[f'praat_F{idx}_std_hz'] = _safe_float(np.std(vals)) if len(vals) else np.nan
-        out[f'praat_F{idx}_median_hz'] = _safe_float(np.median(vals)) if len(vals) else np.nan
-
-    return out
-
-
-def extract_praat_frame_features(wav_path: Path, cfg: dict) -> list[dict[str, float]]:
-    """Return frame-level pitch, intensity, and F1-F3 samples."""
-    snd = parselmouth.Sound(str(wav_path))
-    pitch_floor = float(cfg.get('praat_pitch_floor', 75))
-    pitch_ceiling = float(cfg.get('praat_pitch_ceiling', 600))
-    time_step = float(cfg.get('frame_time_step_sec', 0.01))
-    duration = snd.get_total_duration()
-    if duration <= 0:
-        return []
-
-    times = np.arange(time_step / 2, duration, time_step)
-    if times.size == 0:
-        times = np.asarray([duration / 2], dtype=float)
-
-    try:
-        pitch = snd.to_pitch(time_step=time_step, pitch_floor=pitch_floor, pitch_ceiling=pitch_ceiling)
-    except Exception:
-        pitch = None
-    try:
-        intensity = snd.to_intensity(minimum_pitch=pitch_floor, time_step=time_step)
-    except Exception:
-        intensity = None
-    try:
-        formant = call(
-            snd, 'To Formant (burg)',
-            time_step,
-            int(cfg.get('praat_formant_number', 5)),
-            float(cfg.get('praat_formant_max_hz', 5500)),
-            float(cfg.get('praat_formant_window_length', 0.025)),
-            50,
-        )
-    except Exception:
-        formant = None
-
-    rows: list[dict[str, float]] = []
-    for idx, t in enumerate(times):
-        row = {
-            'frame_index': idx,
-            'frame_start_sec': _safe_float(max(0.0, float(t) - time_step / 2)),
-            'frame_center_sec': _safe_float(t),
-            'frame_end_sec': _safe_float(min(duration, float(t) + time_step / 2)),
-        }
-        if pitch is not None:
-            row['praat_F0_hz'] = _safe_float(call(pitch, 'Get value at time', float(t), 'Hertz', 'Linear'))
-        else:
-            row['praat_F0_hz'] = np.nan
-        if intensity is not None:
-            row['praat_intensity_db'] = _safe_float(call(intensity, 'Get value at time', float(t), 'Cubic'))
-        else:
-            row['praat_intensity_db'] = np.nan
-        for formant_idx in [1, 2, 3]:
-            if formant is not None:
-                row[f'praat_F{formant_idx}_hz'] = _safe_float(
-                    call(formant, 'Get value at time', formant_idx, float(t), 'Hertz', 'Linear')
-                )
-            else:
-                row[f'praat_F{formant_idx}_hz'] = np.nan
-        rows.append(row)
-    return rows

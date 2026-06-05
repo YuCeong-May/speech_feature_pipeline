@@ -92,7 +92,7 @@ def extract_spectral_features(wav_path: Path, cfg: dict) -> dict:
     else:
         out.update(_stats('scipy_psd', np.array([])))
 
-    # LPCC from whole signal LPC. For clinical usage, consider also frame-level LPCC in a later version.
+    # LPCC from whole signal LPC.
     lpc_order = int(cfg.get('lpc_order', 16))
     lpcc_order = int(cfg.get('lpcc_order', 13))
     a = _lpc_coefficients(y, lpc_order)

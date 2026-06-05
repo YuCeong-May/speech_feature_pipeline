@@ -1,10 +1,12 @@
-name: speechfeat
+name: qwen3-asr-aligner
 channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.10
+  - python=3.12
   - ffmpeg
+  - sox
+  - libsox
   - libsndfile
   - pip
   - pip:

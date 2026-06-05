@@ -3,9 +3,9 @@
 本项目用于语音心理/抑郁相关语音分析。整体工作流分为两部分：
 
 1. 直接从音频提取声学特征：FFmpeg + openSMILE + praat-parselmouth + Librosa/SciPy。
-2. 在已有标准答案转录文本时，使用 Qwen3-ForcedAligner 做强制对齐，再根据对齐时间戳计算语速、停顿、发音时间、平均音节时长等对齐后韵律指标。
+2. 默认形成“传统声学特征提取 → Qwen3-ASR 转录 → Qwen3-ForcedAligner 强制对齐”的 pipeline；三个模块都有独立开关，也可以单独运行其中任意一个模块。
 
-输入包括音频文件，以及用于强制对齐的同名 `.txt` 转录文本；`run.py` 会在条件满足时调用内部对齐模块，为文本生成时间戳。
+输入包括音频文件，以及可选的同名 `.txt` 转录文本；`run.py` 会先标准化音频，再按开关决定是否提取传统声学特征、是否自动转录、是否做强制对齐和句子级特征。
 
 
 ## 0. 实验平台
@@ -13,13 +13,15 @@
 本项目当前实验平台：
 
 ```text
-操作系统：Linux Ubuntu xxx
-GPU：NVIDIA RTX 4090 24G
+操作系统：Ubuntu 22.04.5 LTS
+GPU：NVIDIA RTX 4090 24G （建议显存 6GB 以上）
+NVIDIA Driver：575
+CUDA：12.9
 ```
 
 ## 1. 安装 Miniconda
 
-在运行任何流程之前，建议先安装 Miniconda，并用 conda 分别管理传统声学特征环境和 Qwen3-ForcedAligner 环境。
+在运行任何流程之前，建议先安装 Miniconda，并在同一个 `qwen3-asr-aligner` 环境中同时安装传统声学特征依赖和 Qwen3-ASR / Qwen3-ForcedAligner 依赖。
 
 如果机器上还没有 `conda`，可以运行项目提供的安装脚本：
 
@@ -45,32 +47,45 @@ conda activate base
 conda --version
 ```
 
-## 2. 环境配置
+## 2. 统一环境配置
 
-建议使用两个 conda 环境：一个用于传统声学特征提取，一个用于 Qwen3-ForcedAligner。这样可以避免 `qwen-asr`、`torch`、`transformers` 与传统特征库之间的依赖冲突。
+现在只需要安装一个 conda 环境：`qwen3-asr-aligner`。先安装 Qwen3-ASR / Qwen3-ForcedAligner 所需的 Python、PyTorch 和 `qwen-asr`，再在同一个环境中补装传统声学特征依赖。后续传统声学特征提取、自动转录和强制对齐都在这个环境里运行，只通过 `run.py` 的三个模块开关控制。
 
-### 2.1 声学特征环境
+> 注意：现在无需再创建或安装 `speechfeat` 环境。
 
-项目已经提供 `environment.yml`：
+### 2.1 创建 Qwen3-ASR / Qwen3-ForcedAligner 统一环境
 
 ```bash
 cd speech_feature_pipeline
 
-conda env create -f environment.yml
-conda activate speechfeat
+conda create -n qwen3-asr-aligner python=3.12 -y
+conda activate qwen3-asr-aligner
+
+pip install -U pip setuptools wheel
+pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchaudio==2.6.0
+pip install -U qwen-asr soundfile librosa pandas numpy
+pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
+pip uninstall -y huggingface-hub
+pip install "huggingface-hub>=0.34.0,<1.0"
 ```
 
-如果环境已存在，可以补装依赖：
+本项目不要求安装 `flash-attn`。如果不使用 flash attention，加载模型时不要传 `attn_implementation="flash_attention_2"`。
+
+### 2.2 在同一环境中安装传统声学特征依赖
+
+保持在 `qwen3-asr-aligner` 环境中继续执行：
 
 ```bash
-conda activate speechfeat
+conda activate qwen3-asr-aligner
 conda install -c conda-forge ffmpeg sox libsox libsndfile -y
 pip install -r requirements.txt
 ```
 
-主要依赖包括：
+这样同一个环境同时具备：
 
 ```text
+Qwen3-ASR / Qwen3-ForcedAligner
+torch / torchaudio
 ffmpeg
 sox / libsox
 libsndfile
@@ -86,70 +101,59 @@ scikit-learn
 matplotlib
 ```
 
-检查基础工具：
+### 2.3 检查统一环境
 
 ```bash
+conda activate qwen3-asr-aligner
+
 ffmpeg -version
 sox --version
 python - <<'PY'
+import torch
 import opensmile
 import parselmouth
 import librosa
 import scipy
+from qwen_asr import Qwen3ASRModel, Qwen3ForcedAligner
+print("torch:", torch.__version__)
+print("cuda:", torch.cuda.is_available(), torch.cuda.device_count())
 print("openSMILE:", opensmile.__version__)
 print("Parselmouth:", parselmouth.__version__)
 print("Librosa:", librosa.__version__)
 print("SciPy:", scipy.__version__)
-PY
-```
-
-### 2.2 Qwen3-ForcedAligner 环境
-
-用于已有转录文本的强制对齐和对齐后韵律指标计算：
-
-```bash
-conda create -n qwen3-forced-aligner python=3.12 -y
-conda activate qwen3-forced-aligner
-
-pip install -U pip setuptools wheel
-pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchaudio==2.6.0
-pip install -U qwen-asr soundfile librosa pandas numpy
-pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
-```
-
-本项目不要求安装 `flash-attn`。如果不使用 flash attention，加载模型时不要传 `attn_implementation="flash_attention_2"`。
-
-检查 CUDA 和 Qwen3-ForcedAligner：
-
-```bash
-conda activate qwen3-forced-aligner
-
-python - <<'PY'
-import torch
-from qwen_asr import Qwen3ForcedAligner
-print("torch:", torch.__version__)
-print("cuda:", torch.cuda.is_available(), torch.cuda.device_count())
+print("asr:", Qwen3ASRModel)
 print("aligner:", Qwen3ForcedAligner)
 PY
 ```
 
 ## 3. 模型下载
 
-Qwen3-ForcedAligner 模型建议下载到项目同级的模型目录：
+Qwen3-ASR 和 Qwen3-ForcedAligner 模型建议下载到项目同级的模型目录：
 
 ```text
+../pre_trained_models/Qwen3-ASR-1.7B
+../pre_trained_models/Qwen3-ASR-0.6B
 ../pre_trained_models/Qwen3-ForcedAligner-0.6B
 ```
 
-在 `qwen3-forced-aligner` 环境中使用 Hugging Face CLI 下载：
+在统一的 `qwen3-asr-aligner` 环境中使用 Hugging Face CLI 下载。默认转录模型使用 `Qwen3-ASR-1.7B`，如果显存或速度优先，可以改用 `Qwen3-ASR-0.6B`：
 
 ```bash
-conda activate qwen3-forced-aligner
+conda activate qwen3-asr-aligner
 
 pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
 unset HF_HUB_ENABLE_HF_TRANSFER
 export HF_ENDPOINT=https://hf-mirror.com
 export HF_HUB_DISABLE_XET=1
+
+hf download Qwen/Qwen3-ASR-1.7B \
+  --local-dir ../pre_trained_models/Qwen3-ASR-1.7B \
+  --force-download
+
+# 可选：轻量版 ASR 模型
+hf download Qwen/Qwen3-ASR-0.6B \
+  --local-dir ../pre_trained_models/Qwen3-ASR-0.6B \
+  --force-download
 
 hf download Qwen/Qwen3-ForcedAligner-0.6B \
   --local-dir ../pre_trained_models/Qwen3-ForcedAligner-0.6B \
@@ -159,6 +163,7 @@ hf download Qwen/Qwen3-ForcedAligner-0.6B \
 下载完成后检查：
 
 ```bash
+ls -lh ../pre_trained_models/Qwen3-ASR-1.7B
 ls -lh ../pre_trained_models/Qwen3-ForcedAligner-0.6B
 ```
 
@@ -178,7 +183,7 @@ input_audio/
 
 ```bash
 cd speech_feature_pipeline
-conda activate speechfeat
+conda activate qwen3-asr-aligner
 
 python run.py \
   --input_dir ./input_audio \
@@ -201,15 +206,20 @@ python run.py \
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--save_frame_level` | 默认开启 | 帧级 CSV 输出开关，会为每个音频生成频谱帧表和 Praat 帧表；该参数保留用于显式声明。 |
-| `--no_frame_level` | 关闭 | 关闭默认帧级 CSV 输出。 |
-| `--frame_output_dir` | `./output/frame_level` | 帧级 CSV 输出目录。 |
-| `--run_forced_align` | 默认开启 | 帧级特征完成后，在模型和依赖可用时执行 Forced-Aligner、对齐后韵律指标和句子级声学聚合；该参数保留用于显式声明。 |
-| `--no_forced_align` | 关闭 | 关闭默认 Forced-Aligner 和句子级特征计算。 |
-| `--transcript_dir` | `--input_dir` | 转录文本目录，按音频同名 `.txt` 匹配。 |
-| `--sentence_output_dir` | `./output/sentence_level` | 句子级声学特征输出目录，由帧级 CSV 按句子时间窗聚合得到。 |
+| `--run_traditional_acoustic` | 默认开启 | 运行传统声学特征提取；该参数保留用于显式声明。 |
+| `--no_traditional_acoustic` | 关闭传统声学 | 只做转录和/或强制对齐，不输出传统声学汇总 CSV。 |
+| `--run_transcription` | 默认开启 | 运行 Qwen3-ASR 自动转录，先为每个音频生成 `.txt` 转录文本，再进入 Forced-Aligner；该参数保留用于显式声明。 |
+| `--no_transcription` | 关闭转录 | 跳过 Qwen3-ASR，强制对齐会使用 `--transcript_dir` 或 `--input_dir` 中已有同名 `.txt`。 |
+| `--transcription_output_dir` | `./output/transcripts` | Qwen3-ASR 自动转录 `.txt` 和 `.json` 元数据输出目录。 |
+| `--asr_model` | `../pre_trained_models/Qwen3-ASR-1.7B` | Qwen3-ASR 本地模型目录。 |
+| `--asr-language` | 自动识别 | Qwen3-ASR 识别语言；不设置时使用官方接口的自动语言识别。 |
+| `--asr-max-inference-batch-size` | `32` | 传给 `Qwen3ASRModel.from_pretrained(...)` 的 batch 上限。 |
+| `--asr-max-new-tokens` | `4096` | 传给 `Qwen3ASRModel.from_pretrained(...)` 的最大生成 token 数。 |
+| `--run_forced_align` | 默认开启 | 执行 Forced-Aligner、对齐后韵律指标和句子级声学特征提取；该参数保留用于显式声明。 |
+| `--no_forced_align` | 关闭强制对齐 | 跳过 Forced-Aligner、对齐后韵律指标和句子级声学特征。 |
+| `--transcript_dir` | `--input_dir` | 转录文本目录，按音频同名 `.txt` 匹配；开启 `--run_transcription` 后会优先使用自动转录输出目录。 |
+| `--sentence_output_dir` | `./output/sentence_level` | 句子级声学特征输出目录。 |
 
-性能说明：默认帧级 Praat 采样间隔为 `frame_time_step_sec: 0.05` 秒；逐帧 LPCC 默认关闭，因为长访谈上逐帧 LPCC 计算量较大。整段 LPCC 汇总仍会正常输出。如确实需要逐帧 LPCC，可在 `configs/default.yaml` 中设置 `frame_spectral_include_lpcc: true`。
 
 示例：
 
@@ -218,8 +228,21 @@ python run.py \
   --input_dir ./input_audio \
   --output_csv ./output/features_all.csv \
   --save_parts \
-  --transcript_dir ./audio_input \
+  --asr_model ../pre_trained_models/Qwen3-ASR-1.7B \
   --forced_align_model ../pre_trained_models/Qwen3-ForcedAligner-0.6B
+```
+
+三个模块可独立运行，例如：
+
+```bash
+# 只运行传统声学特征
+python run.py --input_dir ./input_audio --output_csv ./output/features_all.csv --save_parts --no_transcription --no_forced_align
+
+# 只运行 Qwen3-ASR 自动转录
+python run.py --input_dir ./input_audio --no_traditional_acoustic --no_forced_align
+
+# 只运行 Forced-Aligner 和对齐后句子级特征，使用已有同名 .txt
+python run.py --input_dir ./input_audio --no_traditional_acoustic --no_transcription --transcript_dir ./input_audio
 ```
 
 该脚本会先用 FFmpeg 转成标准 wav，再按“每个特征只由一个工具负责”的原则提取特征：
@@ -255,39 +278,43 @@ opensmile_feature_level: Functionals
 praat_pitch_floor: 75
 praat_pitch_ceiling: 600
 praat_formant_max_hz: 5500
-frame_time_step_sec: 0.05
-frame_spectral_include_lpcc: false
+praat_formant_window_length: 0.05  # Praat Formants 窗长：50 ms
+praat_formant_time_step: 0.02      # Praat Formants 窗移 / time step：20 ms
 ```
 
-### 4.2 Qwen3-ForcedAligner 强制对齐和对齐后韵律指标
+### 4.2 Qwen3-ASR 自动转录、ForcedAligner 强制对齐和对齐后韵律指标
 
-主目录现在只保留 `run.py` 作为入口。强制对齐脚本和指标脚本已经整理为内部模块：
+主目录现在只保留 `run.py` 作为入口。自动转录、强制对齐脚本和指标脚本已经整理为内部模块：
 
 ```text
+src/align/transcribe.py
 src/align/forced_align.py
 src/align/metrics.py
 ```
 
-默认情况下，`run.py` 会按照下面顺序执行；如果模型或 `qwen_asr/torch` 依赖不可用，会记录 warning 并跳过 Forced-Aligner，可用 `--no_forced_align` 显式关闭：
+其中自动转录模块按 Qwen3-ASR 官方 Python 包用法加载 `Qwen3ASRModel.from_pretrained(...)`，再调用 `model.transcribe(audio=..., language=...)` 生成文本；随后本项目再把生成的 `.txt` 交给 Qwen3-ForcedAligner 做时间戳对齐。
 
-1. 先提取传统声学汇总特征。
-2. 默认提取帧级频谱特征和帧级 Praat 特征。
-3. 再按音频 `file_id` 到 `--transcript_dir` 中寻找同名 `.txt` 转录文本。
-4. 调用 Qwen3-ForcedAligner 生成 JSON/TSV 时间戳。
+默认情况下，`run.py` 会形成完整 pipeline；如果模型或 `qwen_asr/torch` 依赖不可用，会记录 warning 并跳过对应 Qwen3 模块。三个模块均默认开启，也都可以用 `--no_*` 参数独立关闭：
+
+1. 标准化音频为 wav。
+2. 运行传统声学汇总特征提取；可用 `--no_traditional_acoustic` 关闭。
+3. 运行 Qwen3-ASR 自动转录，生成 `.txt`；可用 `--no_transcription` 关闭。
+4. 运行 Qwen3-ForcedAligner 生成 JSON/TSV 时间戳；可用 `--no_forced_align` 关闭。
 5. 调用内部指标模块计算语速、停顿、发音时间、平均音节时长等对齐后韵律指标。
-6. 最后按句子时间窗聚合帧级声学特征，输出句子级声学 CSV。
+6. 最后按句子时间窗直接提取句子级声学特征，输出句子级声学 CSV。
 
 示例：
 
 ```bash
 cd speech_feature_pipeline
-conda activate qwen3-forced-aligner
+conda activate qwen3-asr-aligner
 
 python run.py \
   --input_dir ./input_audio \
   --output_csv ./output/features_all.csv \
   --save_parts \
-  --transcript_dir ./input_audio \
+  --run_transcription \
+  --asr_model ../pre_trained_models/Qwen3-ASR-1.7B \
   --forced_align_model ../pre_trained_models/Qwen3-ForcedAligner-0.6B \
   --language Chinese \
   --device-map cuda:0 \
@@ -298,10 +325,19 @@ python run.py \
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--run_forced_align` | 默认开启 | 帧级特征后继续运行强制对齐、对齐后韵律指标和句子级声学聚合；该参数保留用于显式声明。 |
-| `--no_forced_align` | 关闭 | 关闭默认强制对齐和句子级特征计算。 |
-| `--transcript_dir` | `--input_dir` | 转录文本目录，按音频同名 `.txt` 匹配。 |
-| `--sentence_output_dir` | `./output/sentence_level` | 句子级声学特征输出目录，由帧级 CSV 按句子时间窗聚合得到。 |
+| `--run_traditional_acoustic` | 默认开启 | 运行传统声学特征提取；该参数保留用于显式声明。 |
+| `--no_traditional_acoustic` | 关闭传统声学 | 只做转录和/或强制对齐。 |
+| `--run_transcription` | 默认开启 | 开启 Qwen3-ASR 自动转录；开启后先转录，再用转录文本做 Forced-Aligner。 |
+| `--no_transcription` | 关闭转录 | 跳过 Qwen3-ASR，强制对齐使用已有同名 `.txt`。 |
+| `--transcription_output_dir` | `./output/transcripts` | 自动转录输出目录。 |
+| `--asr_model` | `../pre_trained_models/Qwen3-ASR-1.7B` | Qwen3-ASR 本地模型目录，可改为 `Qwen3-ASR-0.6B`。 |
+| `--asr-language` | 自动识别 | Qwen3-ASR 识别语言；不设置时自动识别。 |
+| `--asr-max-inference-batch-size` | `32` | Qwen3-ASR 推理 batch 上限。 |
+| `--asr-max-new-tokens` | `4096` | Qwen3-ASR 最大生成 token 数。 |
+| `--run_forced_align` | 默认开启 | 继续运行强制对齐、对齐后韵律指标和句子级声学特征提取；该参数保留用于显式声明。 |
+| `--no_forced_align` | 关闭强制对齐 | 关闭 Forced-Aligner、对齐后韵律指标和句子级特征计算。 |
+| `--transcript_dir` | `--input_dir` | 手工转录文本目录；开启 `--run_transcription` 后优先使用自动转录输出目录。 |
+| `--sentence_output_dir` | `./output/sentence_level` | 句子级声学特征输出目录。 |
 | `--align_output_dir` | `./output/align` | 对齐 JSON/TSV 输出目录。 |
 | `--metrics_output_dir` | `./output/metrics` | 对齐后韵律指标输出目录。 |
 | `--forced_align_model` | `../pre_trained_models/Qwen3-ForcedAligner-0.6B` | 本地 Qwen3-ForcedAligner 模型目录。 |
@@ -314,6 +350,8 @@ python run.py \
 默认输出：
 
 ```text
+output/transcripts/<file_id>.txt              # 默认生成；使用 --no_transcription 时不生成
+output/transcripts/<file_id>.qwen3_asr.json   # 默认生成；使用 --no_transcription 时不生成
 output/align/<file_id>.qwen3_forced_align.json
 output/align/<file_id>.qwen3_forced_align.tsv
 output/metrics/<file_id>.qwen3_forced_align.summary.metrics.csv
@@ -346,11 +384,11 @@ output/spectrograms/
 output/work_wav/
 output/logs/extract.log
 
-# 默认还会生成帧级输出：
-output/frame_level/<file_id>.spectral_frames.csv
-output/frame_level/<file_id>.praat_frames.csv
+# 默认会先生成自动转录；使用 --no_transcription 时不生成：
+output/transcripts/<file_id>.txt
+output/transcripts/<file_id>.qwen3_asr.json
 
-# 如果 Forced-Aligner 成功运行，还会生成句子级声学聚合：
+# 如果 Forced-Aligner 成功运行，还会生成句子级声学特征：
 output/sentence_level/<file_id>.independent_filler.sentence_acoustic.csv
 output/sentence_level/<file_id>.merge_filler_to_next.sentence_acoustic.csv
 ```
@@ -483,7 +521,7 @@ total_duration_with_pauses_sec,speech_time_sec,pause_threshold_sec,pause_time_se
 
 ## 6. 重要说明
 
-1. 项目采用唯一责任分工：openSMILE 负责 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ForcedAligner 负责对齐后韵律指标。
+1. 项目采用唯一责任分工：openSMILE 负责 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ASR 负责可选自动转录；Qwen3-ForcedAligner 负责对齐后韵律指标。
 2. 中文计数按汉字逐字统计，英文/数字连续串按 1 个词计。
 3. 默认过滤末尾连续 0 时长 token。若音频末尾确实有发音但被对齐为 0 时长，可人工检查后使用 `--keep-trailing-zero-duration`。
 4. 对齐结果依赖转录文本质量。如果转录中包含音频里没有说出的内容，末尾或局部可能出现时间戳堆叠，建议在数据目录 README 中记录。
