@@ -226,7 +226,7 @@ def _run_forced_alignment(args: argparse.Namespace, wav_jobs: list[tuple[str, Pa
     if importlib.util.find_spec('qwen_asr') is None or importlib.util.find_spec('torch') is None:
         logger.warning(
             'Skip forced alignment and sentence-level metrics: qwen_asr/torch is not installed in this Python environment. '
-            'Run in the qwen3-asr-aligner environment or pass --no_forced_align.'
+            'Install/use the unified qwen3-asr-aligner environment or pass --no_forced_align.'
         )
         return
     if not model_path.exists():
