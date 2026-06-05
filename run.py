@@ -8,12 +8,14 @@ import sys
 import traceback
 from pathlib import Path
 
+import pandas as pd
 from tqdm import tqdm
 
 from src.extract_opensmile import extract_opensmile_features
-from src.extract_praat import extract_praat_features
-from src.extract_spectral import extract_spectral_features
+from src.extract_praat import extract_praat_features, extract_praat_frame_features, summarize_praat_frame_features
+from src.extract_spectral import extract_spectral_features, extract_spectral_frame_features
 from src.merge_features import save_feature_table
+from src.plot_spectrogram import plot_spectrogram
 from src.preprocess import convert_to_wav
 from src.sentence_features import extract_sentence_acoustic_features
 from src.utils import list_audio_files, load_config, setup_logger
@@ -56,6 +58,27 @@ def parse_args() -> argparse.Namespace:
         '--save_parts',
         action='store_true',
         help='Also save module-level CSV files.',
+    )
+
+    parser.add_argument(
+        '--save_frame_level',
+        action='store_true',
+        default=True,
+        help='Export frame-level CSV files. Enabled by default; kept for backward-compatible explicit use.',
+    )
+
+    parser.add_argument(
+        '--no_frame_level',
+        dest='save_frame_level',
+        action='store_false',
+        help='Disable default frame-level CSV export.',
+    )
+
+    parser.add_argument(
+        '--frame_output_dir',
+        type=Path,
+        default=Path('./output/frame_level'),
+        help='Folder for optional frame-level CSV files.',
     )
 
     parser.add_argument(
@@ -371,6 +394,7 @@ def main() -> None:
 
     continue_on_error = bool(cfg.get('continue_on_error', True))
     add_bilingual_row = not args.no_bilingual_row
+    save_spectrogram = False
 
     args.work_dir.mkdir(parents=True, exist_ok=True)
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -489,6 +513,12 @@ def main() -> None:
     if args.run_forced_align:
         logger.info('Starting Qwen3-ForcedAligner and sentence-level metrics.')
         _run_forced_alignment(args, wav_jobs, logger, cfg, transcript_dir)
+    else:
+        logger.info('Forced alignment and sentence-level metrics disabled by --no_forced_align.')
+
+    if args.run_forced_align:
+        logger.info('Traditional acoustic extraction and frame-level features finished. Starting Qwen3-ForcedAligner and sentence-level metrics.')
+        _run_forced_alignment(args, wav_jobs, logger)
     else:
         logger.info('Forced alignment and sentence-level metrics disabled by --no_forced_align.')
 
