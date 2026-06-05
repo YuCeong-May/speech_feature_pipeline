@@ -275,6 +275,8 @@ opensmile_feature_level: Functionals
 praat_pitch_floor: 75
 praat_pitch_ceiling: 600
 praat_formant_max_hz: 5500
+praat_formant_window_length: 0.05  # Praat Formants 窗长：50 ms
+praat_formant_time_step: 0.02      # Praat Formants 窗移 / time step：20 ms
 ```
 
 ### 4.2 Qwen3-ASR 自动转录、ForcedAligner 强制对齐和对齐后韵律指标

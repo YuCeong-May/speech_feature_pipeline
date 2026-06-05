@@ -56,16 +56,20 @@ def extract_praat_features(wav_path: Path, cfg: dict) -> dict:
 
     # Formants F1-F3.
     try:
+        formant_time_step = float(cfg.get('praat_formant_time_step', 0.02))
         formant = call(
             snd, 'To Formant (burg)',
-            0.0,
+            formant_time_step,
             int(cfg.get('praat_formant_number', 5)),
             float(cfg.get('praat_formant_max_hz', 5500)),
-            float(cfg.get('praat_formant_window_length', 0.025)),
+            float(cfg.get('praat_formant_window_length', 0.05)),
             50,
         )
         duration = snd.get_total_duration()
-        times = np.linspace(0.01, max(0.01, duration - 0.01), num=max(10, int(duration / 0.01)))
+        start_time = min(max(formant_time_step / 2, 0.0), duration)
+        times = np.arange(start_time, duration, formant_time_step)
+        if times.size == 0 and duration > 0:
+            times = np.asarray([duration / 2], dtype=float)
         for idx in [1, 2, 3]:
             vals = []
             for t in times:

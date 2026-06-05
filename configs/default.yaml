@@ -15,9 +15,11 @@ psd_nperseg: 1024
 # Praat / Parselmouth settings
 praat_pitch_floor: 75
 praat_pitch_ceiling: 600
+# Praat Formants: window length = 0.05 s (50 ms), frame shift/time step = 0.02 s (20 ms)
 praat_formant_max_hz: 5500
 praat_formant_number: 5
-praat_formant_window_length: 0.025
+praat_formant_window_length: 0.05
+praat_formant_time_step: 0.02
 
 # openSMILE FeatureSet: eGeMAPSv02 is recommended for interpretable clinical/psychology studies.
 # Optional values: eGeMAPSv02, ComParE_2016
