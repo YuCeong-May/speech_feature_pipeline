@@ -65,6 +65,47 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        '--run_transcription',
+        action='store_true',
+        default=False,
+        help='Run Qwen3-ASR transcription before forced alignment. Disabled by default.',
+    )
+
+    parser.add_argument(
+        '--transcription_output_dir',
+        type=Path,
+        default=Path('./output/transcripts'),
+        help='Folder for Qwen3-ASR transcript .txt and metadata .json outputs.',
+    )
+
+    parser.add_argument(
+        '--asr_model',
+        default='../pre_trained_models/Qwen3-ASR-1.7B',
+        help='Local Qwen3-ASR model directory used when --run_transcription is enabled.',
+    )
+
+    parser.add_argument(
+        '--asr-language',
+        dest='asr_language',
+        default=None,
+        help='Qwen3-ASR language name. Leave unset for automatic language detection.',
+    )
+
+    parser.add_argument(
+        '--asr-max-inference-batch-size',
+        type=int,
+        default=32,
+        help='Qwen3-ASR max_inference_batch_size passed to Qwen3ASRModel.from_pretrained.',
+    )
+
+    parser.add_argument(
+        '--asr-max-new-tokens',
+        type=int,
+        default=4096,
+        help='Qwen3-ASR max_new_tokens passed to Qwen3ASRModel.from_pretrained.',
+    )
+
+    parser.add_argument(
         '--run_forced_align',
         action='store_true',
         default=True,
@@ -125,7 +166,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-
 def _find_transcript(transcript_dir: Path, file_id: str) -> Path | None:
     direct = transcript_dir / f'{file_id}.txt'
     if direct.exists():
@@ -138,13 +178,55 @@ def _run_command(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
+def _run_transcription(args: argparse.Namespace, wav_jobs: list[tuple[str, Path]], logger) -> Path:
+    model_path = Path(args.asr_model).expanduser()
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f'Qwen3-ASR model not found at {model_path}. Set --asr_model to a valid local model directory.'
+        )
+
+    args.transcription_output_dir.mkdir(parents=True, exist_ok=True)
+    transcribe_script = Path(__file__).parent / 'src' / 'align' / 'transcribe.py'
+
+    for file_id, wav_path in tqdm(wav_jobs, desc='Transcribing with Qwen3-ASR'):
+        output_text = args.transcription_output_dir / f'{file_id}.txt'
+        output_json = args.transcription_output_dir / f'{file_id}.qwen3_asr.json'
+        cmd = [
+            sys.executable,
+            str(transcribe_script),
+            '--audio',
+            str(wav_path),
+            '--model',
+            args.asr_model,
+            '--device-map',
+            args.device_map,
+            '--dtype',
+            args.dtype,
+            '--max-inference-batch-size',
+            str(args.asr_max_inference_batch_size),
+            '--max-new-tokens',
+            str(args.asr_max_new_tokens),
+            '--output-text',
+            str(output_text),
+            '--output-json',
+            str(output_json),
+        ]
+        if args.asr_language:
+            cmd.extend(['--language', args.asr_language])
+        logger.info(f'[{file_id}] Running Qwen3-ASR transcription...')
+        _run_command(cmd)
+        logger.info(f'[{file_id}] Saved Qwen3-ASR transcript: {output_text}')
+
+    return args.transcription_output_dir
+
+
 def _run_forced_alignment(args: argparse.Namespace, wav_jobs: list[tuple[str, Path]], logger, cfg: dict) -> None:
     transcript_dir = args.transcript_dir or args.input_dir
     model_path = Path(args.forced_align_model).expanduser()
     if importlib.util.find_spec('qwen_asr') is None or importlib.util.find_spec('torch') is None:
         logger.warning(
             'Skip forced alignment and sentence-level metrics: qwen_asr/torch is not installed in this Python environment. '
-            'Run in the qwen3-forced-aligner environment or pass --no_forced_align.'
+            'Run in the qwen3-asr-aligner environment or pass --no_forced_align.'
         )
         return
     if not model_path.exists():
@@ -153,6 +235,13 @@ def _run_forced_alignment(args: argparse.Namespace, wav_jobs: list[tuple[str, Pa
             'Pass --no_forced_align to silence this step, or set --forced_align_model to a valid model directory.'
         )
         return
+
+    if args.run_transcription:
+        try:
+            transcript_dir = _run_transcription(args, wav_jobs, logger)
+        except Exception:
+            logger.error(f'Skip forced alignment: Qwen3-ASR transcription failed.\n{traceback.format_exc()}')
+            return
 
     args.align_output_dir.mkdir(parents=True, exist_ok=True)
     args.metrics_output_dir.mkdir(parents=True, exist_ok=True)
