@@ -18,16 +18,12 @@ FEATURE_NAME_ZH: dict[str, str] = {
     # 时长
     'duration_sec': '音频总时长_秒',
 
-    # Praat: HNR / jitter / shimmer
-    'praat_HNR_mean_db': 'Praat谐波噪声比HNR均值_dB',
-    'praat_HNR_std_db': 'Praat谐波噪声比HNR标准差_dB',
-    'praat_jitter_local': 'Praat频率微扰Jitter_local',
-    'praat_jitter_rap': 'Praat频率微扰Jitter_RAP',
-    'praat_jitter_ppq5': 'Praat频率微扰Jitter_PPQ5',
-    'praat_shimmer_local': 'Praat振幅微扰Shimmer_local',
-    'praat_shimmer_apq3': 'Praat振幅微扰Shimmer_APQ3',
-    'praat_shimmer_apq5': 'Praat振幅微扰Shimmer_APQ5',
-    'praat_shimmer_apq11': 'Praat振幅微扰Shimmer_APQ11',
+    # Praat: F0
+    'praat_F0_mean_hz': 'Praat基频F0均值_Hz',
+    'praat_F0_std_hz': 'Praat基频F0标准差_Hz',
+    'praat_F0_min_hz': 'Praat基频F0最小值_Hz',
+    'praat_F0_max_hz': 'Praat基频F0最大值_Hz',
+    'praat_F0_range_hz': 'Praat基频F0范围_Hz',
 }
 
 
@@ -106,15 +102,6 @@ def chinese_name_for_feature(col: str) -> str:
 
     if 'energy' in lower or 'rms' in lower:
         return '能量或音量相关指标'
-
-    if 'jitter' in lower:
-        return '频率微扰Jitter相关指标'
-
-    if 'shimmer' in lower:
-        return '振幅微扰Shimmer相关指标'
-
-    if 'hnr' in lower or 'harmonic' in lower:
-        return '谐波噪声比或谐波性相关指标'
 
     if 'formant' in lower or lower.startswith('f1') or lower.startswith('f2') or lower.startswith('f3'):
         return '共振峰相关指标'

@@ -219,11 +219,33 @@ def sentence_metrics(sentence: dict, pause_threshold: float) -> dict:
         "speech_rate_chars_per_sec": round(safe_div(char_count, total_duration), 6),
         "speech_rate_words_per_min": round(safe_div(word_count, total_duration) * 60, 6),
         "speech_rate_chars_per_min": round(safe_div(char_count, total_duration) * 60, 6),
+        "articulation_rate_syllables_per_sec": round(safe_div(syllable_count, speech_time), 6),
+        "articulation_rate_chars_per_sec": round(safe_div(char_count, speech_time), 6),
         "avg_syllable_duration": round(safe_div(speech_time, syllable_count), 6),
         "target_char_count": sentence["target_char_count"],
         "matched_char_count": sentence["matched_char_count"],
         "missing_char_count": sentence["missing_char_count"],
     }
+
+
+def add_inter_sentence_gaps(rows: list[dict], pause_threshold: float) -> list[dict]:
+    """Add sentence-to-previous-sentence gap metrics to sentence rows.
+
+    The inter-sentence gap for sentence N is defined as:
+    sentence_N.start_time - sentence_(N-1).end_time.
+    """
+    previous = None
+    for row in rows:
+        if previous is None:
+            gap = 0.0
+        else:
+            gap = max(0.0, float(row["start_time"]) - float(previous["end_time"]))
+        pause = gap if gap >= pause_threshold else 0.0
+        row["inter_sentence_gap_from_prev_sec"] = round(gap, 3)
+        row["inter_sentence_pause_from_prev_sec"] = round(pause, 3)
+        row["inter_sentence_pause_from_prev_count"] = 1 if pause > 0 else 0
+        previous = row
+    return rows
 
 
 def summary_metrics(rows: list[dict]) -> dict:
@@ -240,6 +262,8 @@ def summary_metrics(rows: list[dict]) -> dict:
     total_duration = max(0.0, end - start)
     speech_time = sum(row["speech_time"] for row in rows)
     pause_time = sum(row["pause_time"] for row in rows)
+    inter_sentence_pause_time = sum(row.get("inter_sentence_pause_from_prev_sec", 0.0) for row in rows)
+    inter_sentence_gap_time = sum(row.get("inter_sentence_gap_from_prev_sec", 0.0) for row in rows)
     word_count = sum(row["word_count"] for row in rows)
     char_count = sum(row["char_count"] for row in rows)
     syllable_count = sum(row["syllable_count"] for row in rows)
@@ -253,6 +277,13 @@ def summary_metrics(rows: list[dict]) -> dict:
         "pause_time": round(pause_time, 3),
         "pause_count": sum(row["pause_count"] for row in rows),
         "pause_ratio": round(safe_div(pause_time, total_duration), 6),
+        "inter_sentence_pause_time_sec": round(inter_sentence_pause_time, 3),
+        "inter_sentence_pause_count": sum(row.get("inter_sentence_pause_from_prev_count", 0) for row in rows),
+        "inter_sentence_pause_ratio": round(safe_div(inter_sentence_pause_time, total_duration), 6),
+        "inter_sentence_gap_time_sec_no_threshold": round(inter_sentence_gap_time, 3),
+        "inter_sentence_positive_gap_count_no_threshold": sum(
+            1 for row in rows if row.get("inter_sentence_gap_from_prev_sec", 0.0) > 0
+        ),
         "word_count": word_count,
         "char_count": char_count,
         "syllable_count": syllable_count,
@@ -260,6 +291,8 @@ def summary_metrics(rows: list[dict]) -> dict:
         "speech_rate_chars_per_sec": round(safe_div(char_count, total_duration), 6),
         "speech_rate_words_per_min": round(safe_div(word_count, total_duration) * 60, 6),
         "speech_rate_chars_per_min": round(safe_div(char_count, total_duration) * 60, 6),
+        "articulation_rate_syllables_per_sec": round(safe_div(syllable_count, speech_time), 6),
+        "articulation_rate_chars_per_sec": round(safe_div(char_count, speech_time), 6),
         "avg_syllable_duration": round(safe_div(speech_time, syllable_count), 6),
     }
 
@@ -309,6 +342,8 @@ def global_summary_metrics(items: list[dict], pause_threshold: float) -> dict:
         "speech_rate_chars_per_sec": round(safe_div(char_count, total_duration), 6),
         "speech_rate_words_per_min": round(safe_div(word_count, total_duration) * 60, 6),
         "speech_rate_chars_per_min": round(safe_div(char_count, total_duration) * 60, 6),
+        "articulation_rate_syllables_per_sec": round(safe_div(syllable_count, speech_time), 6),
+        "articulation_rate_chars_per_sec": round(safe_div(char_count, speech_time), 6),
         "avg_syllable_duration_sec": round(safe_div(speech_time, syllable_count), 6),
         "first_valid_start_sec": round(start, 3),
         "last_valid_end_sec": round(end, 3),
@@ -388,6 +423,7 @@ def main():
             sentence_lines = build_sentence_lines(transcript_lines, mode)
             assigned = assign_items_to_sentences(sentence_lines, items)
             rows = [sentence_metrics(sentence, args.pause_threshold) for sentence in assigned]
+            rows = add_inter_sentence_gaps(rows, args.pause_threshold)
             payload["versions"][mode] = {
                 "summary": summary_metrics(rows),
                 "sentences": rows,
