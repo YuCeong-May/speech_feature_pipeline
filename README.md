@@ -71,6 +71,19 @@ conda --version
 
 ```bash
 cd speech_feature_pipeline
+bash scripts/install_miniconda.sh
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate base
+```
+
+也可以手动安装：
+
+```bash
+wget -O /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash /tmp/miniconda.sh -b -p ~/miniconda3
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate base
+```
 
 conda create -n qwen3-asr-aligner python=3.12 -y
 conda activate qwen3-asr-aligner
@@ -110,6 +123,7 @@ pandas
 PyYAML
 tqdm
 scikit-learn
+matplotlib
 ```
 
 ### 2.3 检查统一环境
@@ -391,6 +405,7 @@ output/features_spectral.csv
 output/features_opensmile.csv
 output/features_praat.csv
 output/features_all_feature_name_mapping.csv
+output/spectrograms/
 output/work_wav/
 output/logs/extract.log
 

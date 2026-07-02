@@ -101,3 +101,66 @@ def extract_spectral_features(wav_path: Path, cfg: dict) -> dict:
         out[f'lpcc{i}'] = _safe(v)
 
     return out
+
+
+def _frame_lpcc(y: np.ndarray, frame_length: int, hop_length: int, lpc_order: int, lpcc_order: int) -> np.ndarray:
+    if y.size == 0:
+        return np.empty((0, lpcc_order), dtype=float)
+    if y.size < frame_length:
+        y = np.pad(y, (0, frame_length - y.size))
+    frames = librosa.util.frame(y, frame_length=frame_length, hop_length=hop_length).T
+    rows = []
+    for frame in frames:
+        a = _lpc_coefficients(frame, lpc_order)
+        rows.append(_lpc_to_lpcc(a, lpcc_order))
+    return np.asarray(rows, dtype=float)
+
+
+def extract_spectral_frame_features(wav_path: Path, cfg: dict) -> list[dict[str, float]]:
+    """Return frame-level spectral features for optional time-series export."""
+    sr = int(cfg.get('sample_rate', 16000))
+    y, sr = librosa.load(str(wav_path), sr=sr, mono=True)
+    frame_length = int(cfg.get('frame_length', 2048))
+    hop_length = int(cfg.get('hop_length', 512))
+    n_mfcc = int(cfg.get('mfcc_n', 13))
+    lpc_order = int(cfg.get('lpc_order', 16))
+    lpcc_order = int(cfg.get('lpcc_order', 13))
+    include_lpcc = bool(cfg.get('frame_spectral_include_lpcc', False))
+
+    rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc, hop_length=hop_length)
+    stft_power = np.abs(librosa.stft(y, n_fft=frame_length, hop_length=hop_length)) ** 2
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=frame_length)
+    lpcc = _frame_lpcc(y, frame_length, hop_length, lpc_order, lpcc_order) if include_lpcc else None
+
+    frame_count = max(rms.shape[0], mfcc.shape[1], stft_power.shape[1])
+    centers = librosa.frames_to_time(np.arange(frame_count), sr=sr, hop_length=hop_length, n_fft=frame_length)
+    half_window = frame_length / (2 * sr)
+    bands = [(0, 250), (250, 500), (500, 1000), (1000, 2000), (2000, 4000), (4000, 8000)]
+
+    rows: list[dict[str, float]] = []
+    for idx in range(frame_count):
+        row: dict[str, float] = {
+            'frame_index': idx,
+            'frame_start_sec': _safe(max(0.0, centers[idx] - half_window)),
+            'frame_center_sec': _safe(centers[idx]),
+            'frame_end_sec': _safe(centers[idx] + half_window),
+            'librosa_rms': _safe(rms[idx]) if idx < rms.shape[0] else np.nan,
+        }
+        for mfcc_idx in range(n_mfcc):
+            row[f'librosa_mfcc{mfcc_idx + 1}'] = _safe(mfcc[mfcc_idx, idx]) if idx < mfcc.shape[1] else np.nan
+        if idx < stft_power.shape[1]:
+            pxx = stft_power[:, idx]
+            row.update(_stats('frame_psd', pxx))
+            for lo, hi in bands:
+                mask = (freqs >= lo) & (freqs < hi)
+                row[f'frame_bandpower_{lo}_{hi}_hz'] = _safe(np.trapz(pxx[mask], freqs[mask])) if np.any(mask) else np.nan
+        else:
+            row.update(_stats('frame_psd', np.array([])))
+            for lo, hi in bands:
+                row[f'frame_bandpower_{lo}_{hi}_hz'] = np.nan
+        if lpcc is not None:
+            for lpcc_idx in range(lpcc_order):
+                row[f'frame_lpcc{lpcc_idx + 1}'] = _safe(lpcc[idx, lpcc_idx]) if idx < lpcc.shape[0] else np.nan
+        rows.append(row)
+    return rows
