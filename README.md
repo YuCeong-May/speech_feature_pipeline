@@ -456,6 +456,8 @@ text    start_time    end_time
 
 其中 `*.summary.metrics.csv` 是后续工作流最常用的全局指标表。
 
+`*.independent_filler.metrics.csv` 和 `*.merge_filler_to_next.metrics.csv` 为句子级指标表，其中句内停顿字段为 `pause_time`、`pause_count`、`pause_ratio`；句子间停顿按“当前句 `start_time` - 上一句 `end_time`”计算，并写入 `inter_sentence_gap_from_prev_sec`、`inter_sentence_pause_from_prev_sec`、`inter_sentence_pause_from_prev_count`。第一句没有上一句，句间 gap 记为 0。`*.metrics.json` 中各句子版本的 `summary` 还会汇总 `inter_sentence_pause_time_sec`、`inter_sentence_pause_count`、`inter_sentence_pause_ratio`、`inter_sentence_gap_time_sec_no_threshold`、`inter_sentence_positive_gap_count_no_threshold`。
+
 字段说明：
 
 | 字段 | 含义 |

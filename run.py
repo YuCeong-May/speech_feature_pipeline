@@ -516,12 +516,6 @@ def main() -> None:
     else:
         logger.info('Forced alignment and sentence-level metrics disabled by --no_forced_align.')
 
-    if args.run_forced_align:
-        logger.info('Traditional acoustic extraction and frame-level features finished. Starting Qwen3-ForcedAligner and sentence-level metrics.')
-        _run_forced_alignment(args, wav_jobs, logger)
-    else:
-        logger.info('Forced alignment and sentence-level metrics disabled by --no_forced_align.')
-
 
 if __name__ == '__main__':
     main()

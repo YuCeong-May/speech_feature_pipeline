@@ -228,6 +228,26 @@ def sentence_metrics(sentence: dict, pause_threshold: float) -> dict:
     }
 
 
+def add_inter_sentence_gaps(rows: list[dict], pause_threshold: float) -> list[dict]:
+    """Add sentence-to-previous-sentence gap metrics to sentence rows.
+
+    The inter-sentence gap for sentence N is defined as:
+    sentence_N.start_time - sentence_(N-1).end_time.
+    """
+    previous = None
+    for row in rows:
+        if previous is None:
+            gap = 0.0
+        else:
+            gap = max(0.0, float(row["start_time"]) - float(previous["end_time"]))
+        pause = gap if gap >= pause_threshold else 0.0
+        row["inter_sentence_gap_from_prev_sec"] = round(gap, 3)
+        row["inter_sentence_pause_from_prev_sec"] = round(pause, 3)
+        row["inter_sentence_pause_from_prev_count"] = 1 if pause > 0 else 0
+        previous = row
+    return rows
+
+
 def summary_metrics(rows: list[dict]) -> dict:
     if not rows:
         return {}
@@ -242,6 +262,8 @@ def summary_metrics(rows: list[dict]) -> dict:
     total_duration = max(0.0, end - start)
     speech_time = sum(row["speech_time"] for row in rows)
     pause_time = sum(row["pause_time"] for row in rows)
+    inter_sentence_pause_time = sum(row.get("inter_sentence_pause_from_prev_sec", 0.0) for row in rows)
+    inter_sentence_gap_time = sum(row.get("inter_sentence_gap_from_prev_sec", 0.0) for row in rows)
     word_count = sum(row["word_count"] for row in rows)
     char_count = sum(row["char_count"] for row in rows)
     syllable_count = sum(row["syllable_count"] for row in rows)
@@ -255,6 +277,13 @@ def summary_metrics(rows: list[dict]) -> dict:
         "pause_time": round(pause_time, 3),
         "pause_count": sum(row["pause_count"] for row in rows),
         "pause_ratio": round(safe_div(pause_time, total_duration), 6),
+        "inter_sentence_pause_time_sec": round(inter_sentence_pause_time, 3),
+        "inter_sentence_pause_count": sum(row.get("inter_sentence_pause_from_prev_count", 0) for row in rows),
+        "inter_sentence_pause_ratio": round(safe_div(inter_sentence_pause_time, total_duration), 6),
+        "inter_sentence_gap_time_sec_no_threshold": round(inter_sentence_gap_time, 3),
+        "inter_sentence_positive_gap_count_no_threshold": sum(
+            1 for row in rows if row.get("inter_sentence_gap_from_prev_sec", 0.0) > 0
+        ),
         "word_count": word_count,
         "char_count": char_count,
         "syllable_count": syllable_count,
@@ -394,6 +423,7 @@ def main():
             sentence_lines = build_sentence_lines(transcript_lines, mode)
             assigned = assign_items_to_sentences(sentence_lines, items)
             rows = [sentence_metrics(sentence, args.pause_threshold) for sentence in assigned]
+            rows = add_inter_sentence_gaps(rows, args.pause_threshold)
             payload["versions"][mode] = {
                 "summary": summary_metrics(rows),
                 "sentences": rows,
