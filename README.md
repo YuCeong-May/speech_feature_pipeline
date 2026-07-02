@@ -27,10 +27,10 @@
 本项目当前实验平台：
 
 ```text
-操作系统：Ubuntu 22.04.3 LTS
-GPU：NVIDIA RTX 4090 24G
-NVIDIA Driver：550.144.03
-CUDA：12.4
+操作系统：Ubuntu 22.04.5 LTS
+GPU：NVIDIA RTX 4090 24G （建议显存 6GB 以上）
+NVIDIA Driver：575
+CUDA：12.9
 ```
 
 ## 1. 安装 Miniconda
