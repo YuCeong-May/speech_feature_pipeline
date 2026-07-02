@@ -22,6 +22,23 @@ def extract_praat_features(wav_path: Path, cfg: dict) -> dict:
 
     out: dict[str, float] = {}
 
+    # Pitch/F0 in Hz, kept alongside openSMILE semitone F0 for clearer clinical reporting.
+    try:
+        pitch = snd.to_pitch(pitch_floor=pitch_floor, pitch_ceiling=pitch_ceiling)
+        vals = pitch.selected_array['frequency']
+        vals = vals[np.isfinite(vals) & (vals > 0)]
+        out['praat_F0_mean_hz'] = _safe_float(np.mean(vals)) if len(vals) else np.nan
+        out['praat_F0_std_hz'] = _safe_float(np.std(vals)) if len(vals) else np.nan
+        out['praat_F0_min_hz'] = _safe_float(np.min(vals)) if len(vals) else np.nan
+        out['praat_F0_max_hz'] = _safe_float(np.max(vals)) if len(vals) else np.nan
+        out['praat_F0_range_hz'] = _safe_float(np.max(vals) - np.min(vals)) if len(vals) else np.nan
+    except Exception:
+        out['praat_F0_mean_hz'] = np.nan
+        out['praat_F0_std_hz'] = np.nan
+        out['praat_F0_min_hz'] = np.nan
+        out['praat_F0_max_hz'] = np.nan
+        out['praat_F0_range_hz'] = np.nan
+
     # Intensity is placed here as Praat's definition is common in phonetics.
     try:
         intensity = snd.to_intensity(minimum_pitch=pitch_floor)
@@ -39,16 +56,20 @@ def extract_praat_features(wav_path: Path, cfg: dict) -> dict:
 
     # Formants F1-F3.
     try:
+        formant_time_step = float(cfg.get('praat_formant_time_step', 0.02))
         formant = call(
             snd, 'To Formant (burg)',
-            0.0,
+            formant_time_step,
             int(cfg.get('praat_formant_number', 5)),
             float(cfg.get('praat_formant_max_hz', 5500)),
-            float(cfg.get('praat_formant_window_length', 0.025)),
+            float(cfg.get('praat_formant_window_length', 0.05)),
             50,
         )
         duration = snd.get_total_duration()
-        times = np.linspace(0.01, max(0.01, duration - 0.01), num=max(10, int(duration / 0.01)))
+        start_time = min(max(formant_time_step / 2, 0.0), duration)
+        times = np.arange(start_time, duration, formant_time_step)
+        if times.size == 0 and duration > 0:
+            times = np.asarray([duration / 2], dtype=float)
         for idx in [1, 2, 3]:
             vals = []
             for t in times:
@@ -64,28 +85,5 @@ def extract_praat_features(wav_path: Path, cfg: dict) -> dict:
             out[f'praat_F{idx}_mean_hz'] = np.nan
             out[f'praat_F{idx}_std_hz'] = np.nan
             out[f'praat_F{idx}_median_hz'] = np.nan
-
-    # HNR.
-    try:
-        harmonicity = call(snd, 'To Harmonicity (cc)', 0.01, pitch_floor, 0.1, 1.0)
-        out['praat_HNR_mean_db'] = _safe_float(call(harmonicity, 'Get mean', 0, 0))
-        out['praat_HNR_std_db'] = _safe_float(call(harmonicity, 'Get standard deviation', 0, 0))
-    except Exception:
-        out['praat_HNR_mean_db'] = np.nan
-        out['praat_HNR_std_db'] = np.nan
-
-    # Jitter / shimmer. These may fail for very noisy or unvoiced samples.
-    try:
-        point_process = call(snd, 'To PointProcess (periodic, cc)', pitch_floor, pitch_ceiling)
-        out['praat_jitter_local'] = _safe_float(call(point_process, 'Get jitter (local)', 0, 0, 0.0001, 0.02, 1.3))
-        out['praat_jitter_rap'] = _safe_float(call(point_process, 'Get jitter (rap)', 0, 0, 0.0001, 0.02, 1.3))
-        out['praat_jitter_ppq5'] = _safe_float(call(point_process, 'Get jitter (ppq5)', 0, 0, 0.0001, 0.02, 1.3))
-        out['praat_shimmer_local'] = _safe_float(call([snd, point_process], 'Get shimmer (local)', 0, 0, 0.0001, 0.02, 1.3, 1.6))
-        out['praat_shimmer_apq3'] = _safe_float(call([snd, point_process], 'Get shimmer (apq3)', 0, 0, 0.0001, 0.02, 1.3, 1.6))
-        out['praat_shimmer_apq5'] = _safe_float(call([snd, point_process], 'Get shimmer (apq5)', 0, 0, 0.0001, 0.02, 1.3, 1.6))
-        out['praat_shimmer_apq11'] = _safe_float(call([snd, point_process], 'Get shimmer (apq11)', 0, 0, 0.0001, 0.02, 1.3, 1.6))
-    except Exception:
-        for k in ['jitter_local', 'jitter_rap', 'jitter_ppq5', 'shimmer_local', 'shimmer_apq3', 'shimmer_apq5', 'shimmer_apq11']:
-            out[f'praat_{k}'] = np.nan
 
     return out
