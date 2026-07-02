@@ -8,15 +8,29 @@
 输入包括音频文件，以及可选的同名 `.txt` 转录文本；`run.py` 会先标准化音频，再按开关决定是否提取传统声学特征、是否自动转录、是否做强制对齐和句子级特征。
 
 
+## 更新日志
+
+### 2026-07-02
+
+- 将项目整理为统一 pipeline：`run.py` 默认按“传统声学特征提取 → Qwen3-ASR 自动转录 → Qwen3-ForcedAligner 强制对齐 → 句子级特征输出”的顺序执行。
+- 为传统声学特征、自动转录和强制对齐分别增加独立开关，三个模块默认开启，也可以通过参数单独关闭或独立运行。
+- 新增 Qwen3-ASR 转录配置与模型下载说明，支持先自动生成同名 `.txt` 转录文本，再进入 Forced-Aligner 时间戳对齐。
+- 将 Qwen3-ASR / Qwen3-ForcedAligner 与传统声学特征依赖统一到同一个 `qwen3-asr-aligner` conda 环境中，后续运行无需切换环境。
+- 新增句子级声学特征输出：根据强制对齐得到的句子时间窗切分音频，并为每个句子提取传统声学特征。
+- 新增对齐后的韵律统计，包括全局停顿、句内停顿、句子间间隔/停顿、语速、发音速度、平均音节时长等指标。
+- 将句子间间隔定义为“当前句 `start_time` - 上一句 `end_time`”，并输出 `inter_sentence_gap_from_prev_sec`、`inter_sentence_pause_from_prev_sec`、`inter_sentence_pause_from_prev_count` 等字段。
+- 调整 Praat 共振峰参数：Formants 窗长为 50 ms，窗移为 20 ms，并在配置文件中说明。
+- 更新实验平台信息、Miniconda 安装脚本、模型下载命令和运行示例，便于在 Ubuntu + RTX 4090 平台上复现实验。
+
 ## 0. 实验平台
 
 本项目当前实验平台：
 
 ```text
-操作系统：Ubuntu 22.04.5 LTS
-GPU：NVIDIA RTX 4090 24G （建议显存 6GB 以上）
-NVIDIA Driver：575
-CUDA：12.9
+操作系统：Ubuntu 22.04.3 LTS
+GPU：NVIDIA RTX 4090 24G
+NVIDIA Driver：550.144.03
+CUDA：12.4
 ```
 
 ## 1. 安装 Miniconda
@@ -57,6 +71,19 @@ conda --version
 
 ```bash
 cd speech_feature_pipeline
+bash scripts/install_miniconda.sh
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate base
+```
+
+也可以手动安装：
+
+```bash
+wget -O /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash /tmp/miniconda.sh -b -p ~/miniconda3
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate base
+```
 
 conda create -n qwen3-asr-aligner python=3.12 -y
 conda activate qwen3-asr-aligner
@@ -65,8 +92,6 @@ pip install -U pip setuptools wheel
 pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchaudio==2.6.0
 pip install -U qwen-asr soundfile librosa pandas numpy
 pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
-pip uninstall -y huggingface-hub
-pip install "huggingface-hub>=0.34.0,<1.0"
 ```
 
 本项目不要求安装 `flash-attn`。如果不使用 flash attention，加载模型时不要传 `attn_implementation="flash_attention_2"`。
