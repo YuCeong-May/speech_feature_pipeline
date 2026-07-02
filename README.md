@@ -13,10 +13,10 @@
 本项目当前实验平台：
 
 ```text
-操作系统：Ubuntu 22.04.3 LTS
-GPU：NVIDIA RTX 4090 24G
-NVIDIA Driver：550.144.03
-CUDA：12.4
+操作系统：Ubuntu 22.04.5 LTS
+GPU：NVIDIA RTX 4090 24G （建议显存 6GB 以上）
+NVIDIA Driver：575
+CUDA：12.9
 ```
 
 ## 1. 安装 Miniconda
@@ -65,6 +65,8 @@ pip install -U pip setuptools wheel
 pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchaudio==2.6.0
 pip install -U qwen-asr soundfile librosa pandas numpy
 pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
+pip uninstall -y huggingface-hub
+pip install "huggingface-hub>=0.34.0,<1.0"
 ```
 
 本项目不要求安装 `flash-attn`。如果不使用 flash attention，加载模型时不要传 `attn_implementation="flash_attention_2"`。
@@ -96,6 +98,7 @@ pandas
 PyYAML
 tqdm
 scikit-learn
+matplotlib
 ```
 
 ### 2.3 检查统一环境
@@ -377,6 +380,7 @@ output/features_spectral.csv
 output/features_opensmile.csv
 output/features_praat.csv
 output/features_all_feature_name_mapping.csv
+output/spectrograms/
 output/work_wav/
 output/logs/extract.log
 
