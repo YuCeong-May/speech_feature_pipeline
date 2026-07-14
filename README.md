@@ -33,6 +33,7 @@ NVIDIA Driver：575
 CUDA：12.9
 ```
 
+
 ## 1. 安装 Miniconda
 
 在运行任何流程之前，建议先安装 Miniconda，并在同一个 `qwen3-asr-aligner` 环境中同时安装传统声学特征依赖和 Qwen3-ASR / Qwen3-ForcedAligner 依赖。
@@ -71,27 +72,16 @@ conda --version
 
 ```bash
 cd speech_feature_pipeline
-bash scripts/install_miniconda.sh
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate base
-```
-
-也可以手动安装：
-
-```bash
-wget -O /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash /tmp/miniconda.sh -b -p ~/miniconda3
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate base
-```
 
 conda create -n qwen3-asr-aligner python=3.12 -y
 conda activate qwen3-asr-aligner
 
 pip install -U pip setuptools wheel
-pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchaudio==2.6.0
+pip install torch torchaudio
 pip install -U qwen-asr soundfile librosa pandas numpy
 pip install -U "huggingface_hub[cli]" hf_transfer hf_xet
+pip uninstall -y huggingface-hub
+pip install "huggingface-hub>=0.34.0,<1.0"
 ```
 
 本项目不要求安装 `flash-attn`。如果不使用 flash attention，加载模型时不要传 `attn_implementation="flash_attention_2"`。
