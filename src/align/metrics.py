@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 FILLERS = {"呃", "嗯", "啊", "额", "呃嗯", "嗯嗯", "呃呃", "唔", "唔嗯"}
+SENTENCE_BOUNDARY_PUNCTUATION = set("。！？!?；;，,")
 
 
 def is_cjk(ch: str) -> bool:
@@ -72,8 +73,33 @@ def load_items(path: Path, drop_tail_zero: bool) -> list[dict]:
     ]
 
 
+def split_transcript_lines(lines: list[str]) -> list[str]:
+    """Split transcript text into sentence-like units while keeping punctuation.
+
+    ASR output is often written as one paragraph.  Sentence-level metrics still
+    need the original sentence/clause boundaries before applying filler merge
+    policies; otherwise ``merge_filler_to_next`` can collapse a full interview
+    into a single row and all inter-sentence pauses become zero.
+    """
+    sentence_lines = []
+    for line in lines:
+        buffer = []
+        for ch in line.strip():
+            buffer.append(ch)
+            if ch in SENTENCE_BOUNDARY_PUNCTUATION:
+                sentence = "".join(buffer).strip()
+                if sentence:
+                    sentence_lines.append(sentence)
+                buffer = []
+        sentence = "".join(buffer).strip()
+        if sentence:
+            sentence_lines.append(sentence)
+    return sentence_lines
+
+
 def load_transcript_lines(path: Path) -> list[str]:
-    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    raw_lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return split_transcript_lines(raw_lines)
 
 
 def build_sentence_lines(lines: list[str], mode: str) -> list[str]:

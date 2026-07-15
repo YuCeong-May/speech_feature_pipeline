@@ -10,6 +10,12 @@
 
 ## 更新日志
 
+### 2026-07-15
+
+- 新增 Praat 声门/音质特征输出：谐波噪声比 HNR（`praat_hnr_mean_db`）、频率微扰 jitter（`praat_jitter_local`）和振幅微扰 shimmer（`praat_shimmer_local`）；句子级声学特征中会同步输出对应的 `sentence_praat_*` 字段。
+- 新增 Praat 声门特征配置项：`praat_hnr_time_step`、`praat_hnr_silence_threshold`、`praat_hnr_periods_per_window`、`praat_perturbation_min_period_sec`、`praat_perturbation_max_period_sec`、`praat_perturbation_max_period_factor`、`praat_shimmer_max_amplitude_factor`。
+- 修复段落式转录文本在 `merge_filler_to_next` 版本中过度合并的问题：先按原始标点边界建立句子/分句，再只把独立语气词句合并到下一句，保留正常句子间 `inter_sentence_*` 停顿指标。
+
 ### 2026-07-02
 
 - 将项目整理为统一 pipeline：`run.py` 默认按“传统声学特征提取 → Qwen3-ASR 自动转录 → Qwen3-ForcedAligner 强制对齐 → 句子级特征输出”的顺序执行。
@@ -269,13 +275,14 @@ python run.py --input_dir ./input_audio --no_traditional_acoustic --no_transcrip
 | 韵律声学 | loudness / volume | openSMILE | `opensmile_loudness...`、`opensmile_equivalentSoundLevel...` |
 | 语音学 | intensity | praat-parselmouth | `praat_intensity...` |
 | 共振峰 | F1、F2、F3 | praat-parselmouth | `praat_F1...`、`praat_F2...`、`praat_F3...` |
+| 声门/音质 | 谐波噪声比 HNR、频率微扰 jitter、振幅微扰 shimmer | praat-parselmouth | `praat_hnr...`、`praat_jitter...`、`praat_shimmer...` |
 | 频谱/能量 | RMS | Librosa | `librosa_rms...` |
 | 频谱 | MFCC | Librosa | `librosa_mfcc...` |
 | 频谱 | PSD、bandpower | SciPy | `scipy_psd...`、`scipy_bandpower...` |
 | 频谱 | LPCC | Python 自定义 LPC -> LPCC | `lpcc...` |
 | 对齐后韵律 | 语速、停顿时长、停顿次数、发音时间、平均音节时长、停顿占比 | Qwen3-ForcedAligner + `run.py` 内部指标模块 | `output/metrics/` |
 
-说明：openSMILE 负责 F0、loudness、volume 相关字段；Librosa/SciPy 负责频谱字段。Praat 相关计算通过 `praat-parselmouth` Python 包完成，即 `parselmouth.Sound` 和 `parselmouth.praat.call(...)`。
+说明：openSMILE 负责 F0、loudness、volume 相关字段；Librosa/SciPy 负责频谱字段。Praat 负责 intensity、F1-F3 以及声门/音质字段。Praat 相关计算通过 `praat-parselmouth` Python 包完成，即 `parselmouth.Sound` 和 `parselmouth.praat.call(...)`。
 
 配置文件：
 
@@ -295,6 +302,13 @@ praat_pitch_ceiling: 600
 praat_formant_max_hz: 5500
 praat_formant_window_length: 0.05  # Praat Formants 窗长：50 ms
 praat_formant_time_step: 0.02      # Praat Formants 窗移 / time step：20 ms
+praat_hnr_time_step: 0.01
+praat_hnr_silence_threshold: 0.1
+praat_hnr_periods_per_window: 1.0
+praat_perturbation_min_period_sec: 0.0001
+praat_perturbation_max_period_sec: 0.02
+praat_perturbation_max_period_factor: 1.3
+praat_shimmer_max_amplitude_factor: 1.6
 ```
 
 ### 4.2 Qwen3-ASR 自动转录、ForcedAligner 强制对齐和对齐后韵律指标
@@ -419,6 +433,9 @@ output/sentence_level/<file_id>.merge_filler_to_next.sentence_acoustic.csv
 | `opensmile_equivalentSoundLevel...` | openSMILE volume / sound level 统计 |
 | `praat_intensity` | praat-parselmouth 强度统计 |
 | `praat_F1/F2/F3` | praat-parselmouth 共振峰统计 |
+| `praat_hnr` | praat-parselmouth 谐波噪声比 HNR，单位 dB |
+| `praat_jitter` | praat-parselmouth 频率微扰 jitter |
+| `praat_shimmer` | praat-parselmouth 振幅微扰 shimmer |
 | `librosa_rms` | Librosa RMS 能量统计 |
 | `librosa_mfcc` | Librosa MFCC 统计 |
 | `scipy_psd` | 功率谱密度统计 |
@@ -485,6 +502,14 @@ text    start_time    end_time
 | `pause_ratio_percent` | 停顿时间 / 总发音时长 * 100 |
 | `all_gap_time_sec_no_threshold` | 不设阈值时所有正 gap 总和，仅作参考 |
 | `all_positive_gap_count_no_threshold` | 不设阈值时所有正 gap 个数，仅作参考 |
+| `inter_sentence_gap_from_prev_sec` | 句子级 CSV 字段：当前句 `start_time` 减上一句 `end_time`；不套用阈值，第一句记为 0 |
+| `inter_sentence_pause_from_prev_sec` | 句子级 CSV 字段：当 `inter_sentence_gap_from_prev_sec >= pause_threshold_sec` 时等于该 gap，否则为 0 |
+| `inter_sentence_pause_from_prev_count` | 句子级 CSV 字段：当 `inter_sentence_pause_from_prev_sec > 0` 时为 1，否则为 0 |
+| `inter_sentence_pause_time_sec` | `*.metrics.json` 各句子版本 summary 字段：汇总所有句子的 `inter_sentence_pause_from_prev_sec` |
+| `inter_sentence_pause_count` | `*.metrics.json` 各句子版本 summary 字段：汇总所有句子的 `inter_sentence_pause_from_prev_count` |
+| `inter_sentence_pause_ratio` | `*.metrics.json` 各句子版本 summary 字段：`inter_sentence_pause_time_sec / total_duration` |
+| `inter_sentence_gap_time_sec_no_threshold` | `*.metrics.json` 各句子版本 summary 字段：汇总所有句子的 `inter_sentence_gap_from_prev_sec`，不套用阈值 |
+| `inter_sentence_positive_gap_count_no_threshold` | `*.metrics.json` 各句子版本 summary 字段：`inter_sentence_gap_from_prev_sec > 0` 的句子数 |
 | `word_count` | 词语数：中文汉字逐字计数，英文/数字连续串计 1 个词 |
 | `char_count` | 总字数：中文汉字 + 英文/数字字符数 |
 | `cjk_char_count` | 中文汉字数 |
@@ -501,6 +526,17 @@ text    start_time    end_time
 | `last_valid_end_sec` | 最后一个有效 token 结束时间 |
 | `valid_token_count` | 有效 token 数 |
 | `valid_text` | 参与计算的有效文本 |
+
+声门/音质特征字段对照：
+
+| 字段 | Praat 对应指标 | 含义 |
+|---|---|---|
+| `praat_hnr_mean_db` | Harmonicity (cc) → mean HNR | 谐波噪声比均值，单位 dB；数值越高通常表示周期性谐波成分相对噪声越强 |
+| `praat_jitter_local` | PointProcess → Jitter (local) | 频率微扰，相邻声周期时长变化的局部比例 |
+| `praat_shimmer_local` | Sound + PointProcess → Shimmer (local) | 振幅微扰，相邻声周期振幅变化的局部比例 |
+| `sentence_praat_hnr_mean_db` | 同 `praat_hnr_mean_db` | 句子级音频切片上的 HNR |
+| `sentence_praat_jitter_local` | 同 `praat_jitter_local` | 句子级音频切片上的 jitter |
+| `sentence_praat_shimmer_local` | 同 `praat_shimmer_local` | 句子级音频切片上的 shimmer |
 
 示例 summary：
 
@@ -538,7 +574,7 @@ total_duration_with_pauses_sec,speech_time_sec,pause_threshold_sec,pause_time_se
 
 ## 6. 重要说明
 
-1. 项目采用唯一责任分工：openSMILE 负责 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ASR 负责可选自动转录；Qwen3-ForcedAligner 负责对齐后韵律指标。
+1. 项目采用唯一责任分工：openSMILE 负责 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3、HNR、jitter、shimmer；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ASR 负责可选自动转录；Qwen3-ForcedAligner 负责对齐后韵律指标。
 2. 中文计数按汉字逐字统计，英文/数字连续串按 1 个词计。
 3. 默认过滤末尾连续 0 时长 token。若音频末尾确实有发音但被对齐为 0 时长，可人工检查后使用 `--keep-trailing-zero-duration`。
 4. 对齐结果依赖转录文本质量。如果转录中包含音频里没有说出的内容，末尾或局部可能出现时间戳堆叠，建议在数据目录 README 中记录。
