@@ -12,7 +12,7 @@
 
 ### 2026-07-15
 
-- 新增 Praat 声门/音质特征输出：谐波噪声比 HNR（`praat_hnr_mean_db`）、频率微扰 jitter（`praat_jitter_local`、`praat_jitter_rap`）和振幅微扰 shimmer（`praat_shimmer_local`、`praat_shimmer_apq3`）；句子级声学特征中会同步输出对应的 `sentence_praat_*` 字段。
+- 新增 Praat 声门/音质特征输出：谐波噪声比 HNR（`praat_hnr_mean_db`）、频率微扰 jitter（`praat_jitter_local`、`praat_jitter_rap`）和振幅微扰 shimmer（`praat_shimmer_local`、`praat_shimmer_apq3`）；这些声门/音质指标只在整段音频级别输出，不在句子级声学特征中重复输出。
 - 新增 Praat 声门特征配置项：`praat_hnr_time_step`、`praat_hnr_silence_threshold`、`praat_hnr_periods_per_window`、`praat_perturbation_min_period_sec`、`praat_perturbation_max_period_sec`、`praat_perturbation_max_period_factor`、`praat_shimmer_max_amplitude_factor`。
 - 修复段落式转录文本在 `merge_filler_to_next` 版本中过度合并的问题：先按原始标点边界建立句子/分句，再只把独立语气词句合并到下一句，保留正常句子间 `inter_sentence_*` 停顿指标。
 
@@ -536,11 +536,7 @@ text    start_time    end_time
 | `praat_jitter_rap` | PointProcess → Jitter (rap) | 频率微扰 RAP（Relative Average Perturbation），基于 3 点相邻周期平滑后的相对平均扰动 |
 | `praat_shimmer_local` | Sound + PointProcess → Shimmer (local) | 振幅微扰，相邻声周期振幅变化的局部比例 |
 | `praat_shimmer_apq3` | Sound + PointProcess → Shimmer (apq3) | 振幅微扰 APQ3，基于 3 点相邻周期振幅平滑后的幅度扰动商 |
-| `sentence_praat_hnr_mean_db` | 同 `praat_hnr_mean_db` | 句子级音频切片上的 HNR |
-| `sentence_praat_jitter_local` | 同 `praat_jitter_local` | 句子级音频切片上的 jitter local |
-| `sentence_praat_jitter_rap` | 同 `praat_jitter_rap` | 句子级音频切片上的 jitter RAP |
-| `sentence_praat_shimmer_local` | 同 `praat_shimmer_local` | 句子级音频切片上的 shimmer local |
-| `sentence_praat_shimmer_apq3` | 同 `praat_shimmer_apq3` | 句子级音频切片上的 shimmer APQ3 |
+| `sentence_praat_*` | 不适用 | 声门/音质指标仅做整段音频级统计，句子级输出会排除 HNR、jitter、shimmer 字段 |
 
 示例 summary：
 
