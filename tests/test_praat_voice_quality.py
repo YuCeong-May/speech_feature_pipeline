@@ -20,13 +20,19 @@ def test_extract_praat_voice_quality_fields():
 
     assert "praat_hnr_mean_db" in features
     assert "praat_jitter_local" in features
+    assert "praat_jitter_rap" in features
     assert "praat_shimmer_local" in features
+    assert "praat_shimmer_apq3" in features
     assert np.isfinite(features["praat_hnr_mean_db"])
     assert np.isfinite(features["praat_jitter_local"])
+    assert np.isfinite(features["praat_jitter_rap"])
     assert np.isfinite(features["praat_shimmer_local"])
+    assert np.isfinite(features["praat_shimmer_apq3"])
 
 
 def test_voice_quality_feature_name_mapping():
     assert chinese_name_for_feature("praat_hnr_mean_db") == "Praat谐波噪声比HNR均值_dB"
     assert chinese_name_for_feature("praat_jitter_local") == "Praat频率微扰Jitter_local"
+    assert chinese_name_for_feature("praat_jitter_rap") == "Praat频率微扰Jitter_RAP"
     assert chinese_name_for_feature("praat_shimmer_local") == "Praat振幅微扰Shimmer_local"
+    assert chinese_name_for_feature("praat_shimmer_apq3") == "Praat振幅微扰Shimmer_APQ3"

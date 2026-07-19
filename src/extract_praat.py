@@ -19,7 +19,9 @@ def _nan_praat_voice_quality() -> dict[str, float]:
     return {
         'praat_hnr_mean_db': np.nan,
         'praat_jitter_local': np.nan,
+        'praat_jitter_rap': np.nan,
         'praat_shimmer_local': np.nan,
+        'praat_shimmer_apq3': np.nan,
     }
 
 
@@ -63,6 +65,17 @@ def _extract_praat_voice_quality(
                 perturbation_max_period_factor,
             )
         )
+        out['praat_jitter_rap'] = _safe_float(
+            call(
+                point_process,
+                'Get jitter (rap)',
+                0,
+                0,
+                perturbation_min_period,
+                perturbation_max_period,
+                perturbation_max_period_factor,
+            )
+        )
         out['praat_shimmer_local'] = _safe_float(
             call(
                 [snd, point_process],
@@ -75,9 +88,23 @@ def _extract_praat_voice_quality(
                 float(cfg.get('praat_shimmer_max_amplitude_factor', 1.6)),
             )
         )
+        out['praat_shimmer_apq3'] = _safe_float(
+            call(
+                [snd, point_process],
+                'Get shimmer (apq3)',
+                0,
+                0,
+                perturbation_min_period,
+                perturbation_max_period,
+                perturbation_max_period_factor,
+                float(cfg.get('praat_shimmer_max_amplitude_factor', 1.6)),
+            )
+        )
     except Exception:
         out['praat_jitter_local'] = np.nan
+        out['praat_jitter_rap'] = np.nan
         out['praat_shimmer_local'] = np.nan
+        out['praat_shimmer_apq3'] = np.nan
 
     return out
 

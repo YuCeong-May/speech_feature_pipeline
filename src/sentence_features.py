@@ -13,12 +13,19 @@ from src.extract_praat import extract_praat_features
 from src.extract_spectral import extract_spectral_features
 
 FeatureExtractor = Callable[[Path, dict], dict]
+PRAAT_WHOLE_FILE_ONLY_PREFIXES = (
+    'praat_hnr_',
+    'praat_jitter_',
+    'praat_shimmer_',
+)
 
 
 def _prefixed_extract(prefix: str, extractor: FeatureExtractor, wav_path: Path, cfg: dict) -> dict:
     try:
         result = {}
         for key, value in extractor(wav_path, cfg).items():
+            if prefix == 'sentence_praat' and key.startswith(PRAAT_WHOLE_FILE_ONLY_PREFIXES):
+                continue
             clean_key = key
             for source_prefix in ('praat_', 'opensmile_'):
                 if clean_key.startswith(source_prefix):
