@@ -12,12 +12,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.extract_opensmile import extract_opensmile_features
-from src.extract_praat import extract_praat_features, extract_praat_frame_features, summarize_praat_frame_features
-from src.extract_spectral import extract_spectral_features, extract_spectral_frame_features
+from src.extract_praat import extract_praat_features
+from src.extract_spectral import extract_spectral_features
 from src.merge_features import save_feature_table
 from src.plot_spectrogram import plot_spectrogram
 from src.preprocess import convert_to_wav
-from src.sentence_features import extract_sentence_acoustic_features
 from src.utils import list_audio_files, load_config, setup_logger
 
 
@@ -185,13 +184,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        '--sentence_output_dir',
-        type=Path,
-        default=Path('./output/sentence_level'),
-        help='Folder for sentence-level acoustic feature outputs.',
-    )
-
-    parser.add_argument(
         '--forced_align_model',
         default='../pre_trained_models/Qwen3-ForcedAligner-0.6B',
         help='Local Qwen3-ForcedAligner model directory.',
@@ -297,12 +289,11 @@ def _run_forced_alignment(
 
     args.align_output_dir.mkdir(parents=True, exist_ok=True)
     args.metrics_output_dir.mkdir(parents=True, exist_ok=True)
-    args.sentence_output_dir.mkdir(parents=True, exist_ok=True)
 
     align_script = Path(__file__).parent / 'src' / 'align' / 'forced_align.py'
     metrics_script = Path(__file__).parent / 'src' / 'align' / 'metrics.py'
 
-    for file_id, wav_path in tqdm(wav_jobs, desc='Forced aligning and sentence-level features'):
+    for file_id, wav_path in tqdm(wav_jobs, desc='Forced aligning and alignment metrics'):
         transcript_path = _find_transcript(transcript_dir, file_id)
         if transcript_path is None:
             logger.warning(f'Skip forced alignment for {file_id}: transcript not found in {transcript_dir}')
@@ -349,22 +340,6 @@ def _run_forced_alignment(
             metrics_cmd.append('--keep-trailing-zero-duration')
         logger.info(f'[{file_id}] Calculating global and sentence-level alignment metrics...')
         _run_command(metrics_cmd)
-
-        for mode in ('independent_filler', 'merge_filler_to_next'):
-            sentence_metrics_csv = args.metrics_output_dir / f'{output_json.stem}.{mode}.metrics.csv'
-            if not sentence_metrics_csv.exists():
-                continue
-            sentence_output_csv = args.sentence_output_dir / f'{file_id}.{mode}.sentence_acoustic.csv'
-            sentence_work_dir = args.work_dir / 'sentence_wav' / file_id / mode
-            logger.info(f'[{file_id}] Extracting sentence-level acoustic features for {mode}...')
-            extract_sentence_acoustic_features(
-                sentence_metrics_csv,
-                wav_path,
-                cfg,
-                sentence_work_dir,
-                sentence_output_csv,
-            )
-            logger.info(f'[{file_id}] Saved sentence-level acoustic features: {sentence_output_csv}')
 
 
 def main() -> None:

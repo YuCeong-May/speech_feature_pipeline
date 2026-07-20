@@ -15,6 +15,100 @@ def _safe_float(x):
         return np.nan
 
 
+def _nan_praat_voice_quality() -> dict[str, float]:
+    return {
+        'praat_hnr_mean_db': np.nan,
+        'praat_jitter_local': np.nan,
+        'praat_jitter_rap': np.nan,
+        'praat_shimmer_local': np.nan,
+        'praat_shimmer_apq3': np.nan,
+    }
+
+
+def _extract_praat_voice_quality(
+    snd: parselmouth.Sound,
+    cfg: dict,
+    pitch_floor: float,
+    pitch_ceiling: float,
+) -> dict[str, float]:
+    """Extract Praat glottal/voice-quality measures."""
+    out = _nan_praat_voice_quality()
+
+    # Harmonics-to-noise ratio (HNR) from Praat Harmonicity (cc), in dB.
+    try:
+        harmonicity = call(
+            snd,
+            'To Harmonicity (cc)',
+            float(cfg.get('praat_hnr_time_step', 0.01)),
+            pitch_floor,
+            float(cfg.get('praat_hnr_silence_threshold', 0.1)),
+            float(cfg.get('praat_hnr_periods_per_window', 1.0)),
+        )
+        out['praat_hnr_mean_db'] = _safe_float(call(harmonicity, 'Get mean', 0, 0))
+    except Exception:
+        out['praat_hnr_mean_db'] = np.nan
+
+    # Local jitter and shimmer from Praat's periodic PointProcess.
+    try:
+        point_process = call(snd, 'To PointProcess (periodic, cc)', pitch_floor, pitch_ceiling)
+        perturbation_min_period = float(cfg.get('praat_perturbation_min_period_sec', 0.0001))
+        perturbation_max_period = float(cfg.get('praat_perturbation_max_period_sec', 0.02))
+        perturbation_max_period_factor = float(cfg.get('praat_perturbation_max_period_factor', 1.3))
+        out['praat_jitter_local'] = _safe_float(
+            call(
+                point_process,
+                'Get jitter (local)',
+                0,
+                0,
+                perturbation_min_period,
+                perturbation_max_period,
+                perturbation_max_period_factor,
+            )
+        )
+        out['praat_jitter_rap'] = _safe_float(
+            call(
+                point_process,
+                'Get jitter (rap)',
+                0,
+                0,
+                perturbation_min_period,
+                perturbation_max_period,
+                perturbation_max_period_factor,
+            )
+        )
+        out['praat_shimmer_local'] = _safe_float(
+            call(
+                [snd, point_process],
+                'Get shimmer (local)',
+                0,
+                0,
+                perturbation_min_period,
+                perturbation_max_period,
+                perturbation_max_period_factor,
+                float(cfg.get('praat_shimmer_max_amplitude_factor', 1.6)),
+            )
+        )
+        out['praat_shimmer_apq3'] = _safe_float(
+            call(
+                [snd, point_process],
+                'Get shimmer (apq3)',
+                0,
+                0,
+                perturbation_min_period,
+                perturbation_max_period,
+                perturbation_max_period_factor,
+                float(cfg.get('praat_shimmer_max_amplitude_factor', 1.6)),
+            )
+        )
+    except Exception:
+        out['praat_jitter_local'] = np.nan
+        out['praat_jitter_rap'] = np.nan
+        out['praat_shimmer_local'] = np.nan
+        out['praat_shimmer_apq3'] = np.nan
+
+    return out
+
+
 def extract_praat_features(wav_path: Path, cfg: dict) -> dict:
     snd = parselmouth.Sound(str(wav_path))
     pitch_floor = float(cfg.get('praat_pitch_floor', 75))
@@ -85,5 +179,7 @@ def extract_praat_features(wav_path: Path, cfg: dict) -> dict:
             out[f'praat_F{idx}_mean_hz'] = np.nan
             out[f'praat_F{idx}_std_hz'] = np.nan
             out[f'praat_F{idx}_median_hz'] = np.nan
+
+    out.update(_extract_praat_voice_quality(snd, cfg, pitch_floor, pitch_ceiling))
 
     return out

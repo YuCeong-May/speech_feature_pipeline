@@ -24,6 +24,11 @@ FEATURE_NAME_ZH: dict[str, str] = {
     'praat_F0_min_hz': 'Praat基频F0最小值_Hz',
     'praat_F0_max_hz': 'Praat基频F0最大值_Hz',
     'praat_F0_range_hz': 'Praat基频F0范围_Hz',
+    'praat_hnr_mean_db': 'Praat谐波噪声比HNR均值_dB',
+    'praat_jitter_local': 'Praat频率微扰Jitter_local',
+    'praat_jitter_rap': 'Praat频率微扰Jitter_RAP',
+    'praat_shimmer_local': 'Praat振幅微扰Shimmer_local',
+    'praat_shimmer_apq3': 'Praat振幅微扰Shimmer_APQ3',
 }
 
 

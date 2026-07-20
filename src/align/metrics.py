@@ -8,12 +8,17 @@ Two sentence policies are reported:
 
 import argparse
 import csv
+import importlib
+import importlib.util
 import json
 import re
 from pathlib import Path
 
 
 FILLERS = {"呃", "嗯", "啊", "额", "呃嗯", "嗯嗯", "呃呃", "唔", "唔嗯"}
+SENTENCE_BOUNDARY_PUNCTUATION = set("。！？!?；;，,")
+_JIEBA_SPEC = importlib.util.find_spec("jieba")
+jieba = importlib.import_module("jieba") if _JIEBA_SPEC else None
 
 
 def is_cjk(ch: str) -> bool:
@@ -72,8 +77,33 @@ def load_items(path: Path, drop_tail_zero: bool) -> list[dict]:
     ]
 
 
+def split_transcript_lines(lines: list[str]) -> list[str]:
+    """Split transcript text into sentence-like units while keeping punctuation.
+
+    ASR output is often written as one paragraph.  Sentence-level metrics still
+    need the original sentence/clause boundaries before applying filler merge
+    policies; otherwise ``merge_filler_to_next`` can collapse a full interview
+    into a single row and all inter-sentence pauses become zero.
+    """
+    sentence_lines = []
+    for line in lines:
+        buffer = []
+        for ch in line.strip():
+            buffer.append(ch)
+            if ch in SENTENCE_BOUNDARY_PUNCTUATION:
+                sentence = "".join(buffer).strip()
+                if sentence:
+                    sentence_lines.append(sentence)
+                buffer = []
+        sentence = "".join(buffer).strip()
+        if sentence:
+            sentence_lines.append(sentence)
+    return sentence_lines
+
+
 def load_transcript_lines(path: Path) -> list[str]:
-    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    raw_lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return split_transcript_lines(raw_lines)
 
 
 def build_sentence_lines(lines: list[str], mode: str) -> list[str]:
@@ -175,6 +205,83 @@ def safe_div(num: float, den: float) -> float:
     return num / den if den > 0 else 0.0
 
 
+def segment_words(text: str) -> list[str]:
+    normalized = "".join(normalized_chars(text))
+    if not normalized:
+        return []
+    if jieba is None:
+        return normalized_chars(text)
+    return [word for word in jieba.lcut(normalized) if normalized_chars(word)]
+
+
+def word_index_by_char(text: str) -> list[int]:
+    mapping = []
+    for word_idx, word in enumerate(segment_words(text)):
+        mapping.extend([word_idx] * len(normalized_chars(word)))
+    return mapping
+
+
+def item_char_spans(items: list[dict]) -> list[tuple[int, int] | None]:
+    spans = []
+    char_pos = 0
+    for item in items:
+        chars = item_norm_text(item)
+        if not chars:
+            spans.append(None)
+            continue
+        start = char_pos
+        char_pos += len(chars)
+        spans.append((start, char_pos))
+    return spans
+
+
+def word_pause_metrics(items: list[dict], text: str, pause_threshold: float) -> dict:
+    ordered = sorted(
+        [item for item in items if item["end_time"] >= item["start_time"]],
+        key=lambda x: (x["start_time"], x["end_time"]),
+    )
+    spans = item_char_spans(ordered)
+    char_to_word = word_index_by_char(text)
+    metrics = {
+        "within_word_pause_time": 0.0,
+        "within_word_pause_count": 0,
+        "within_word_gap_time_no_threshold": 0.0,
+        "within_word_positive_gap_count_no_threshold": 0,
+        "between_word_pause_time": 0.0,
+        "between_word_pause_count": 0,
+        "between_word_gap_time_no_threshold": 0.0,
+        "between_word_positive_gap_count_no_threshold": 0,
+    }
+
+    for prev_idx, cur_idx in zip(range(len(ordered) - 1), range(1, len(ordered))):
+        prev_span = spans[prev_idx]
+        cur_span = spans[cur_idx]
+        if prev_span is None or cur_span is None:
+            continue
+        prev_char_idx = prev_span[1] - 1
+        cur_char_idx = cur_span[0]
+        if prev_char_idx >= len(char_to_word) or cur_char_idx >= len(char_to_word):
+            continue
+
+        scope = "within_word" if char_to_word[prev_char_idx] == char_to_word[cur_char_idx] else "between_word"
+        gap = ordered[cur_idx]["start_time"] - ordered[prev_idx]["end_time"]
+        if gap > 0:
+            metrics[f"{scope}_gap_time_no_threshold"] += gap
+            metrics[f"{scope}_positive_gap_count_no_threshold"] += 1
+        if gap >= pause_threshold:
+            metrics[f"{scope}_pause_time"] += gap
+            metrics[f"{scope}_pause_count"] += 1
+
+    for key in (
+        "within_word_pause_time",
+        "within_word_gap_time_no_threshold",
+        "between_word_pause_time",
+        "between_word_gap_time_no_threshold",
+    ):
+        metrics[key] = round(metrics[key], 3)
+    return metrics
+
+
 def sentence_metrics(sentence: dict, pause_threshold: float) -> dict:
     items = sentence["items"]
     text = sentence["text"]
@@ -201,6 +308,7 @@ def sentence_metrics(sentence: dict, pause_threshold: float) -> dict:
     char_count = count_chars(text)
     word_count = count_words(text)
     syllable_count = count_syllables(text)
+    word_pause = word_pause_metrics(valid_items, text, pause_threshold)
 
     return {
         "sentence_id": sentence["sentence_id"],
@@ -225,6 +333,7 @@ def sentence_metrics(sentence: dict, pause_threshold: float) -> dict:
         "target_char_count": sentence["target_char_count"],
         "matched_char_count": sentence["matched_char_count"],
         "missing_char_count": sentence["missing_char_count"],
+        **word_pause,
     }
 
 
@@ -262,6 +371,10 @@ def summary_metrics(rows: list[dict]) -> dict:
     total_duration = max(0.0, end - start)
     speech_time = sum(row["speech_time"] for row in rows)
     pause_time = sum(row["pause_time"] for row in rows)
+    within_word_pause_time = sum(row.get("within_word_pause_time", 0.0) for row in rows)
+    within_word_gap_time = sum(row.get("within_word_gap_time_no_threshold", 0.0) for row in rows)
+    between_word_pause_time = sum(row.get("between_word_pause_time", 0.0) for row in rows)
+    between_word_gap_time = sum(row.get("between_word_gap_time_no_threshold", 0.0) for row in rows)
     inter_sentence_pause_time = sum(row.get("inter_sentence_pause_from_prev_sec", 0.0) for row in rows)
     inter_sentence_gap_time = sum(row.get("inter_sentence_gap_from_prev_sec", 0.0) for row in rows)
     word_count = sum(row["word_count"] for row in rows)
@@ -277,6 +390,20 @@ def summary_metrics(rows: list[dict]) -> dict:
         "pause_time": round(pause_time, 3),
         "pause_count": sum(row["pause_count"] for row in rows),
         "pause_ratio": round(safe_div(pause_time, total_duration), 6),
+        "within_word_pause_time": round(within_word_pause_time, 3),
+        "within_word_pause_count": sum(row.get("within_word_pause_count", 0) for row in rows),
+        "within_word_pause_ratio": round(safe_div(within_word_pause_time, total_duration), 6),
+        "within_word_gap_time_no_threshold": round(within_word_gap_time, 3),
+        "within_word_positive_gap_count_no_threshold": sum(
+            row.get("within_word_positive_gap_count_no_threshold", 0) for row in rows
+        ),
+        "between_word_pause_time": round(between_word_pause_time, 3),
+        "between_word_pause_count": sum(row.get("between_word_pause_count", 0) for row in rows),
+        "between_word_pause_ratio": round(safe_div(between_word_pause_time, total_duration), 6),
+        "between_word_gap_time_no_threshold": round(between_word_gap_time, 3),
+        "between_word_positive_gap_count_no_threshold": sum(
+            row.get("between_word_positive_gap_count_no_threshold", 0) for row in rows
+        ),
         "inter_sentence_pause_time_sec": round(inter_sentence_pause_time, 3),
         "inter_sentence_pause_count": sum(row.get("inter_sentence_pause_from_prev_count", 0) for row in rows),
         "inter_sentence_pause_ratio": round(safe_div(inter_sentence_pause_time, total_duration), 6),
@@ -412,6 +539,7 @@ def main():
         "pause_threshold": args.pause_threshold,
         "trailing_zero_duration_policy": "keep" if args.keep_trailing_zero_duration else "drop",
         "word_count_method": "cjk_char_plus_ascii_runs",
+        "word_pause_segmentation": "jieba" if jieba is not None else "character_fallback_when_jieba_unavailable",
         "global_summary": global_summary_metrics(items, args.pause_threshold),
         "versions": {},
     }

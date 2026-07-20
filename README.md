@@ -5,18 +5,25 @@
 1. 直接从音频提取声学特征：FFmpeg + openSMILE + praat-parselmouth + Librosa/SciPy。
 2. 默认形成“传统声学特征提取 → Qwen3-ASR 转录 → Qwen3-ForcedAligner 强制对齐”的 pipeline；三个模块都有独立开关，也可以单独运行其中任意一个模块。
 
-输入包括音频文件，以及可选的同名 `.txt` 转录文本；`run.py` 会先标准化音频，再按开关决定是否提取传统声学特征、是否自动转录、是否做强制对齐和句子级特征。
+输入包括音频文件，以及可选的同名 `.txt` 转录文本；`run.py` 会先标准化音频，再按开关决定是否提取传统声学特征、是否自动转录、是否做强制对齐和对齐后韵律指标。
 
 
 ## 更新日志
 
+### 2026-07-15
+
+- 新增基于 jieba 词边界的词内/词间停顿统计：在句子级 metrics CSV 和 `*.metrics.json` 句子版本 summary 中输出 `within_word_*` 与 `between_word_*` 停顿时长、次数和无阈值 gap 参考字段。
+- 新增 Praat 声门/音质特征输出：谐波噪声比 HNR（`praat_hnr_mean_db`）、频率微扰 jitter（`praat_jitter_local`、`praat_jitter_rap`）和振幅微扰 shimmer（`praat_shimmer_local`、`praat_shimmer_apq3`）；这些声门/音质指标只在整段音频级别输出，不在句子级声学特征中重复输出。
+- 取消句子级声学特征提取步骤：句子级输出仅保留 Forced-Aligner 后的句子边界、句内/句间停顿、语速等对齐后韵律指标；不再按句子时间窗重复提取 openSMILE、Praat、Librosa/SciPy 声学特征。
+- 新增 Praat 声门特征配置项：`praat_hnr_time_step`、`praat_hnr_silence_threshold`、`praat_hnr_periods_per_window`、`praat_perturbation_min_period_sec`、`praat_perturbation_max_period_sec`、`praat_perturbation_max_period_factor`、`praat_shimmer_max_amplitude_factor`。
+- 修复段落式转录文本在 `merge_filler_to_next` 版本中过度合并的问题：先按原始标点边界建立句子/分句，再只把独立语气词句合并到下一句，保留正常句子间 `inter_sentence_*` 停顿指标。
+
 ### 2026-07-02
 
-- 将项目整理为统一 pipeline：`run.py` 默认按“传统声学特征提取 → Qwen3-ASR 自动转录 → Qwen3-ForcedAligner 强制对齐 → 句子级特征输出”的顺序执行。
+- 将项目整理为统一 pipeline：`run.py` 默认按“传统声学特征提取 → Qwen3-ASR 自动转录 → Qwen3-ForcedAligner 强制对齐 → 对齐后韵律指标输出”的顺序执行。
 - 为传统声学特征、自动转录和强制对齐分别增加独立开关，三个模块默认开启，也可以通过参数单独关闭或独立运行。
 - 新增 Qwen3-ASR 转录配置与模型下载说明，支持先自动生成同名 `.txt` 转录文本，再进入 Forced-Aligner 时间戳对齐。
 - 将 Qwen3-ASR / Qwen3-ForcedAligner 与传统声学特征依赖统一到同一个 `qwen3-asr-aligner` conda 环境中，后续运行无需切换环境。
-- 新增句子级声学特征输出：根据强制对齐得到的句子时间窗切分音频，并为每个句子提取传统声学特征。
 - 新增对齐后的韵律统计，包括全局停顿、句内停顿、句子间间隔/停顿、语速、发音速度、平均音节时长等指标。
 - 将句子间间隔定义为“当前句 `start_time` - 上一句 `end_time`”，并输出 `inter_sentence_gap_from_prev_sec`、`inter_sentence_pause_from_prev_sec`、`inter_sentence_pause_from_prev_count` 等字段。
 - 调整 Praat 共振峰参数：Formants 窗长为 50 ms，窗移为 20 ms，并在配置文件中说明。
@@ -230,10 +237,9 @@ python run.py \
 | `--asr-language` | 自动识别 | Qwen3-ASR 识别语言；不设置时使用官方接口的自动语言识别。 |
 | `--asr-max-inference-batch-size` | `32` | 传给 `Qwen3ASRModel.from_pretrained(...)` 的 batch 上限。 |
 | `--asr-max-new-tokens` | `4096` | 传给 `Qwen3ASRModel.from_pretrained(...)` 的最大生成 token 数。 |
-| `--run_forced_align` | 默认开启 | 执行 Forced-Aligner、对齐后韵律指标和句子级声学特征提取；该参数保留用于显式声明。 |
-| `--no_forced_align` | 关闭强制对齐 | 跳过 Forced-Aligner、对齐后韵律指标和句子级声学特征。 |
+| `--run_forced_align` | 默认开启 | 执行 Forced-Aligner 和对齐后韵律指标；该参数保留用于显式声明。 |
+| `--no_forced_align` | 关闭强制对齐 | 跳过 Forced-Aligner 和对齐后韵律指标。 |
 | `--transcript_dir` | `--input_dir` | 转录文本目录，按音频同名 `.txt` 匹配；开启 `--run_transcription` 后会优先使用自动转录输出目录。 |
-| `--sentence_output_dir` | `./output/sentence_level` | 句子级声学特征输出目录。 |
 
 
 示例：
@@ -256,7 +262,7 @@ python run.py --input_dir ./input_audio --output_csv ./output/features_all.csv -
 # 只运行 Qwen3-ASR 自动转录
 python run.py --input_dir ./input_audio --no_traditional_acoustic --no_forced_align
 
-# 只运行 Forced-Aligner 和对齐后句子级特征，使用已有同名 .txt
+# 只运行 Forced-Aligner 和对齐后韵律指标，使用已有同名 .txt
 python run.py --input_dir ./input_audio --no_traditional_acoustic --no_transcription --transcript_dir ./input_audio
 ```
 
@@ -269,13 +275,14 @@ python run.py --input_dir ./input_audio --no_traditional_acoustic --no_transcrip
 | 韵律声学 | loudness / volume | openSMILE | `opensmile_loudness...`、`opensmile_equivalentSoundLevel...` |
 | 语音学 | intensity | praat-parselmouth | `praat_intensity...` |
 | 共振峰 | F1、F2、F3 | praat-parselmouth | `praat_F1...`、`praat_F2...`、`praat_F3...` |
+| 声门/音质 | 谐波噪声比 HNR、频率微扰 jitter/local 与 jitter RAP、振幅微扰 shimmer/local 与 shimmer APQ3 | praat-parselmouth | `praat_hnr...`、`praat_jitter...`、`praat_shimmer...` |
 | 频谱/能量 | RMS | Librosa | `librosa_rms...` |
 | 频谱 | MFCC | Librosa | `librosa_mfcc...` |
 | 频谱 | PSD、bandpower | SciPy | `scipy_psd...`、`scipy_bandpower...` |
 | 频谱 | LPCC | Python 自定义 LPC -> LPCC | `lpcc...` |
 | 对齐后韵律 | 语速、停顿时长、停顿次数、发音时间、平均音节时长、停顿占比 | Qwen3-ForcedAligner + `run.py` 内部指标模块 | `output/metrics/` |
 
-说明：openSMILE 负责 F0、loudness、volume 相关字段；Librosa/SciPy 负责频谱字段。Praat 相关计算通过 `praat-parselmouth` Python 包完成，即 `parselmouth.Sound` 和 `parselmouth.praat.call(...)`。
+说明：openSMILE 负责 F0、loudness、volume 相关字段；Librosa/SciPy 负责频谱字段。Praat 负责 intensity、F1-F3 以及声门/音质字段。Praat 相关计算通过 `praat-parselmouth` Python 包完成，即 `parselmouth.Sound` 和 `parselmouth.praat.call(...)`。
 
 配置文件：
 
@@ -295,6 +302,13 @@ praat_pitch_ceiling: 600
 praat_formant_max_hz: 5500
 praat_formant_window_length: 0.05  # Praat Formants 窗长：50 ms
 praat_formant_time_step: 0.02      # Praat Formants 窗移 / time step：20 ms
+praat_hnr_time_step: 0.01
+praat_hnr_silence_threshold: 0.1
+praat_hnr_periods_per_window: 1.0
+praat_perturbation_min_period_sec: 0.0001
+praat_perturbation_max_period_sec: 0.02
+praat_perturbation_max_period_factor: 1.3
+praat_shimmer_max_amplitude_factor: 1.6
 ```
 
 ### 4.2 Qwen3-ASR 自动转录、ForcedAligner 强制对齐和对齐后韵律指标
@@ -316,7 +330,6 @@ src/align/metrics.py
 3. 运行 Qwen3-ASR 自动转录，生成 `.txt`；可用 `--no_transcription` 关闭。
 4. 运行 Qwen3-ForcedAligner 生成 JSON/TSV 时间戳；可用 `--no_forced_align` 关闭。
 5. 调用内部指标模块计算语速、停顿、发音时间、平均音节时长等对齐后韵律指标。
-6. 最后按句子时间窗直接提取句子级声学特征，输出句子级声学 CSV。
 
 示例：
 
@@ -349,10 +362,9 @@ python run.py \
 | `--asr-language` | 自动识别 | Qwen3-ASR 识别语言；不设置时自动识别。 |
 | `--asr-max-inference-batch-size` | `32` | Qwen3-ASR 推理 batch 上限。 |
 | `--asr-max-new-tokens` | `4096` | Qwen3-ASR 最大生成 token 数。 |
-| `--run_forced_align` | 默认开启 | 继续运行强制对齐、对齐后韵律指标和句子级声学特征提取；该参数保留用于显式声明。 |
-| `--no_forced_align` | 关闭强制对齐 | 关闭 Forced-Aligner、对齐后韵律指标和句子级特征计算。 |
+| `--run_forced_align` | 默认开启 | 继续运行强制对齐和对齐后韵律指标；该参数保留用于显式声明。 |
+| `--no_forced_align` | 关闭强制对齐 | 关闭 Forced-Aligner 和对齐后韵律指标计算。 |
 | `--transcript_dir` | `--input_dir` | 手工转录文本目录；开启 `--run_transcription` 后优先使用自动转录输出目录。 |
-| `--sentence_output_dir` | `./output/sentence_level` | 句子级声学特征输出目录。 |
 | `--align_output_dir` | `./output/align` | 对齐 JSON/TSV 输出目录。 |
 | `--metrics_output_dir` | `./output/metrics` | 对齐后韵律指标输出目录。 |
 | `--forced_align_model` | `../pre_trained_models/Qwen3-ForcedAligner-0.6B` | 本地 Qwen3-ForcedAligner 模型目录。 |
@@ -371,8 +383,6 @@ output/align/<file_id>.qwen3_forced_align.json
 output/align/<file_id>.qwen3_forced_align.tsv
 output/metrics/<file_id>.qwen3_forced_align.summary.metrics.csv
 output/metrics/<file_id>.qwen3_forced_align.metrics.json
-output/sentence_level/<file_id>.independent_filler.sentence_acoustic.csv
-output/sentence_level/<file_id>.merge_filler_to_next.sentence_acoustic.csv
 ```
 
 `--pause-threshold` 的含义：
@@ -403,9 +413,6 @@ output/logs/extract.log
 output/transcripts/<file_id>.txt
 output/transcripts/<file_id>.qwen3_asr.json
 
-# 如果 Forced-Aligner 成功运行，还会生成句子级声学特征：
-output/sentence_level/<file_id>.independent_filler.sentence_acoustic.csv
-output/sentence_level/<file_id>.merge_filler_to_next.sentence_acoustic.csv
 ```
 
 注意：`output/` 下的 CSV 是运行脚本后的生成产物，不是特征定义的权威来源。修改代码或切换版本后，应重新运行 `python run.py --save_parts` 生成新结果；字段口径以当前 `src/extract_*.py` 和 `src/merge_features.py` 为准。
@@ -419,6 +426,9 @@ output/sentence_level/<file_id>.merge_filler_to_next.sentence_acoustic.csv
 | `opensmile_equivalentSoundLevel...` | openSMILE volume / sound level 统计 |
 | `praat_intensity` | praat-parselmouth 强度统计 |
 | `praat_F1/F2/F3` | praat-parselmouth 共振峰统计 |
+| `praat_hnr` | praat-parselmouth 谐波噪声比 HNR，单位 dB |
+| `praat_jitter` | praat-parselmouth 频率微扰 jitter；包含 local 和 RAP |
+| `praat_shimmer` | praat-parselmouth 振幅微扰 shimmer；包含 local 和 APQ3 |
 | `librosa_rms` | Librosa RMS 能量统计 |
 | `librosa_mfcc` | Librosa MFCC 统计 |
 | `scipy_psd` | 功率谱密度统计 |
@@ -471,7 +481,7 @@ text    start_time    end_time
 
 其中 `*.summary.metrics.csv` 是后续工作流最常用的全局指标表。
 
-`*.independent_filler.metrics.csv` 和 `*.merge_filler_to_next.metrics.csv` 为句子级指标表，其中句内停顿字段为 `pause_time`、`pause_count`、`pause_ratio`；句子间停顿按“当前句 `start_time` - 上一句 `end_time`”计算，并写入 `inter_sentence_gap_from_prev_sec`、`inter_sentence_pause_from_prev_sec`、`inter_sentence_pause_from_prev_count`。第一句没有上一句，句间 gap 记为 0。`*.metrics.json` 中各句子版本的 `summary` 还会汇总 `inter_sentence_pause_time_sec`、`inter_sentence_pause_count`、`inter_sentence_pause_ratio`、`inter_sentence_gap_time_sec_no_threshold`、`inter_sentence_positive_gap_count_no_threshold`。
+`*.independent_filler.metrics.csv` 和 `*.merge_filler_to_next.metrics.csv` 为句子级指标表，其中句内停顿字段为 `pause_time`、`pause_count`、`pause_ratio`；句内停顿会进一步按 jieba 词边界拆分为词内 `within_word_*` 和词间 `between_word_*`；句子间停顿按“当前句 `start_time` - 上一句 `end_time`”计算，并写入 `inter_sentence_gap_from_prev_sec`、`inter_sentence_pause_from_prev_sec`、`inter_sentence_pause_from_prev_count`。第一句没有上一句，句间 gap 记为 0。`*.metrics.json` 中各句子版本的 `summary` 还会汇总 `inter_sentence_pause_time_sec`、`inter_sentence_pause_count`、`inter_sentence_pause_ratio`、`inter_sentence_gap_time_sec_no_threshold`、`inter_sentence_positive_gap_count_no_threshold`。
 
 字段说明：
 
@@ -485,6 +495,24 @@ text    start_time    end_time
 | `pause_ratio_percent` | 停顿时间 / 总发音时长 * 100 |
 | `all_gap_time_sec_no_threshold` | 不设阈值时所有正 gap 总和，仅作参考 |
 | `all_positive_gap_count_no_threshold` | 不设阈值时所有正 gap 个数，仅作参考 |
+| `within_word_pause_time` | 句子级 CSV / summary 字段：同一个 jieba 分词内部相邻 token gap 大于等于阈值的总时长，例如“觉……得” |
+| `within_word_pause_count` | 句子级 CSV / summary 字段：同一个 jieba 分词内部达到阈值的停顿次数 |
+| `within_word_pause_ratio` | summary 字段：`within_word_pause_time / total_duration` |
+| `within_word_gap_time_no_threshold` | 句子级 CSV / summary 字段：同一个 jieba 分词内部所有正 gap 总时长，不套用阈值 |
+| `within_word_positive_gap_count_no_threshold` | 句子级 CSV / summary 字段：同一个 jieba 分词内部正 gap 个数，不套用阈值 |
+| `between_word_pause_time` | 句子级 CSV / summary 字段：相邻 jieba 分词之间 token gap 大于等于阈值的总时长 |
+| `between_word_pause_count` | 句子级 CSV / summary 字段：相邻 jieba 分词之间达到阈值的停顿次数 |
+| `between_word_pause_ratio` | summary 字段：`between_word_pause_time / total_duration` |
+| `between_word_gap_time_no_threshold` | 句子级 CSV / summary 字段：相邻 jieba 分词之间所有正 gap 总时长，不套用阈值 |
+| `between_word_positive_gap_count_no_threshold` | 句子级 CSV / summary 字段：相邻 jieba 分词之间正 gap 个数，不套用阈值 |
+| `inter_sentence_gap_from_prev_sec` | 句子级 CSV 字段：当前句 `start_time` 减上一句 `end_time`；不套用阈值，第一句记为 0 |
+| `inter_sentence_pause_from_prev_sec` | 句子级 CSV 字段：当 `inter_sentence_gap_from_prev_sec >= pause_threshold_sec` 时等于该 gap，否则为 0 |
+| `inter_sentence_pause_from_prev_count` | 句子级 CSV 字段：当 `inter_sentence_pause_from_prev_sec > 0` 时为 1，否则为 0 |
+| `inter_sentence_pause_time_sec` | `*.metrics.json` 各句子版本 summary 字段：汇总所有句子的 `inter_sentence_pause_from_prev_sec` |
+| `inter_sentence_pause_count` | `*.metrics.json` 各句子版本 summary 字段：汇总所有句子的 `inter_sentence_pause_from_prev_count` |
+| `inter_sentence_pause_ratio` | `*.metrics.json` 各句子版本 summary 字段：`inter_sentence_pause_time_sec / total_duration` |
+| `inter_sentence_gap_time_sec_no_threshold` | `*.metrics.json` 各句子版本 summary 字段：汇总所有句子的 `inter_sentence_gap_from_prev_sec`，不套用阈值 |
+| `inter_sentence_positive_gap_count_no_threshold` | `*.metrics.json` 各句子版本 summary 字段：`inter_sentence_gap_from_prev_sec > 0` 的句子数 |
 | `word_count` | 词语数：中文汉字逐字计数，英文/数字连续串计 1 个词 |
 | `char_count` | 总字数：中文汉字 + 英文/数字字符数 |
 | `cjk_char_count` | 中文汉字数 |
@@ -501,6 +529,16 @@ text    start_time    end_time
 | `last_valid_end_sec` | 最后一个有效 token 结束时间 |
 | `valid_token_count` | 有效 token 数 |
 | `valid_text` | 参与计算的有效文本 |
+
+声门/音质特征字段对照：
+
+| 字段 | Praat 对应指标 | 含义 |
+|---|---|---|
+| `praat_hnr_mean_db` | Harmonicity (cc) → mean HNR | 谐波噪声比均值，单位 dB；数值越高通常表示周期性谐波成分相对噪声越强 |
+| `praat_jitter_local` | PointProcess → Jitter (local) | 频率微扰，相邻声周期时长变化的局部比例 |
+| `praat_jitter_rap` | PointProcess → Jitter (rap) | 频率微扰 RAP（Relative Average Perturbation），基于 3 点相邻周期平滑后的相对平均扰动 |
+| `praat_shimmer_local` | Sound + PointProcess → Shimmer (local) | 振幅微扰，相邻声周期振幅变化的局部比例 |
+| `praat_shimmer_apq3` | Sound + PointProcess → Shimmer (apq3) | 振幅微扰 APQ3，基于 3 点相邻周期振幅平滑后的幅度扰动商 |
 
 示例 summary：
 
@@ -538,7 +576,7 @@ total_duration_with_pauses_sec,speech_time_sec,pause_threshold_sec,pause_time_se
 
 ## 6. 重要说明
 
-1. 项目采用唯一责任分工：openSMILE 负责 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ASR 负责可选自动转录；Qwen3-ForcedAligner 负责对齐后韵律指标。
+1. 项目采用唯一责任分工：openSMILE 负责 F0、loudness、volume；praat-parselmouth 负责 F0、intensity、F1-F3、HNR、jitter、shimmer；Librosa/SciPy 负责 RMS、MFCC、PSD、bandpower、LPCC；Qwen3-ASR 负责可选自动转录；Qwen3-ForcedAligner 负责对齐后韵律指标。
 2. 中文计数按汉字逐字统计，英文/数字连续串按 1 个词计。
 3. 默认过滤末尾连续 0 时长 token。若音频末尾确实有发音但被对齐为 0 时长，可人工检查后使用 `--keep-trailing-zero-duration`。
 4. 对齐结果依赖转录文本质量。如果转录中包含音频里没有说出的内容，末尾或局部可能出现时间戳堆叠，建议在数据目录 README 中记录。
